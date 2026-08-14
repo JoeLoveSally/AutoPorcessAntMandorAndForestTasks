@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "auto-process-ant-tasks"
+version = "0.1.0"
+description = "Evidence-driven Android automation for Alipay Ant Manor and Ant Forest"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+vision = ["opencv-python>=4.8", "numpy>=1.24"]
+
+[project.scripts]
+ants-auto = "ants_automation.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ants_automation*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

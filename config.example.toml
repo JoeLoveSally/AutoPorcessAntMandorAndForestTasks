@@ -1,0 +1,12 @@
+package = "com.eg.android.AlipayGphone"
+
+[device]
+serial = ""
+adb_path = "adb"
+timeout_seconds = 20.0
+
+[runtime]
+artifacts_directory = "artifacts"
+launch_wait_seconds = 5.0
+page_timeout_seconds = 15.0
+poll_interval_seconds = 0.5

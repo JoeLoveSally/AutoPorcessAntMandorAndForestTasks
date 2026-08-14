@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy>
+  <node text="欢乐全家桶" class="android.widget.TextView" clickable="false" enabled="true" bounds="[0,0][400,120]" />
+  <node text="立即签到" class="android.widget.Button" clickable="true" enabled="true" bounds="[300,2100][700,2300]" />
+</hierarchy>

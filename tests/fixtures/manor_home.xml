@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy>
+  <node text="蚂蚁庄园" class="android.widget.TextView" clickable="false" enabled="true" bounds="[0,0][300,120]" />
+  <node text="家庭" class="android.widget.Button" clickable="true" enabled="true" bounds="[300,2100][540,2300]" />
+  <node text="去捐蛋" class="android.widget.Button" clickable="true" enabled="true" bounds="[540,2100][800,2300]" />
+</hierarchy>

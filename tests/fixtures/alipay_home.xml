@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy>
+  <node text="" class="android.widget.FrameLayout" clickable="false" enabled="true" bounds="[0,0][1080,2400]">
+    <node text="蚂蚁庄园" class="android.widget.TextView" clickable="true" enabled="true" bounds="[0,0][300,200]" />
+    <node text="蚂蚁森林" class="android.widget.TextView" clickable="true" enabled="true" bounds="[300,0][600,200]" />
+  </node>
+</hierarchy>

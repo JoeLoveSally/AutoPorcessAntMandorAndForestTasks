@@ -6,3 +6,4 @@ artifacts/*
 !artifacts/.gitkeep
 /legacy
 /.git-data
+config.toml

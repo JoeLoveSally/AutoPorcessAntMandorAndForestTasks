@@ -1,0 +1,1 @@
+"""Validated atomic device actions."""
