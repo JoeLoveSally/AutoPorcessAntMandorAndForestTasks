@@ -68,6 +68,8 @@ Verify
 
 v0.2 不设计定时调度、后台常驻、远程控制、跨设备编排或断点续跑。一次运行只负责当前设备上的一次任务执行，并输出完整结果；下一次运行重新从设备当前状态开始识别。
 
+当前新增的联网答题仍属于确定性 Workflow：搜索只用于从候选项中取得明确答案，不参与页面规划。搜索结果无法唯一确定选项时立即停止。能量雨是另一个受限特例，仅在已识别的能量雨阶段对 HSV 绿色、面积和圆度同时满足阈值的目标执行点击。
+
 ---
 
 ## 3. 非目标
@@ -526,9 +528,13 @@ SUCCESS / ALREADY_DONE / SKIPPED / UNKNOWN / FAILED
 | --- | --- | --- | --- |
 | 进入蚂蚁庄园 | `ALIPAY_HOME` | 已验证 | 识别 `MANOR_HOME` |
 | 进入家庭 | `MANOR_HOME` | 已验证 | 识别 `MANOR_FAMILY` |
-| 家庭签到 | `MANOR_FAMILY` | 首个闭环 | 识别成功提示或已签到状态 |
-| 庄园其他任务 | `MANOR_HOME` | 规划中 | 识别任务完成状态 |
-| 森林收能量/浇水 | `FOREST_HOME` | 规划中 | 识别任务完成状态 |
+| 家庭签到 | `MANOR_FAMILY` | 已验证 | 识别任务面板成功态或“攒亲密度”已签到状态 |
+| 家庭每日捐蛋 | `MANOR_FAMILY` | 已验证 | 识别奖励页；重复运行识别任务 `(1/1)` |
+| 好友喂食打赏 | `MANOR_HOME` | 已验证 | 打赏按钮消失并经过有限静默等待 |
+| 红点日记本 | `MANOR_HOME` | 入口已验证 | Android 返回后重新识别主页 |
+| 庄园饲料与轮盘 | `MANOR_HOME` | 录屏实现，待真机校准 | 领取、答题、视频、任务进度及奖励确认 |
+| 森林收能量/轮盘/浇水 | `FOREST_HOME` | 录屏实现，待真机校准 | 识别轮盘跳转、任务进度和 100g 浇水结果 |
+| 森林能量雨 | `FOREST_HOME` | 录屏实现，待真机校准 | 视觉点击、赠送“小布”及两轮结果页 |
 
 ---
 
@@ -557,8 +563,10 @@ MANOR_FAMILY_SIGNED
 | 当前状态 | 条件 | 处理 | 结果 |
 | --- | --- | --- | --- |
 | 任意已知页面 | 出现已确认且安全的业务弹窗 | 执行唯一的关闭动作，重新 Observe | 继续当前任务 |
-| `MANOR_FAMILY` | 存在 enabled 的“立即签到” | 点击并验证签到结果 | `SUCCESS` 或 `UNKNOWN` |
-| `MANOR_FAMILY` | 不存在签到按钮，但存在已签到标记 | 不点击 | `ALREADY_DONE` |
+| `MANOR_FAMILY` | 存在 enabled 的“立即签到” | 点击并验证任务面板与状态变化 | `SUCCESS` 或 `UNKNOWN` |
+| `MANOR_FAMILY` | 不存在签到按钮，但存在“攒亲密度”标记 | 不点击 | `ALREADY_DONE` |
+| `MANOR_FAMILY` | 捐蛋任务为 `(0/1)` 且存在“去捐蛋” | 选择首个项目并按默认数量捐蛋 | `SUCCESS` 或 `UNKNOWN` |
+| `MANOR_FAMILY` | 捐蛋任务为 `(1/1)` | 不进入捐蛋页面 | `ALREADY_DONE` |
 | `MANOR_FAMILY` | 没有签到按钮，也没有已签到标记 | 保存证据并停止 | `UNKNOWN` |
 | 任意状态 | 页面跳转到 `UNKNOWN` | 保存证据，不执行业务点击 | `UNKNOWN` |
 | 任意状态 | 设备断开、ADB 超时或动作失败 | 保存可用证据并终止本次运行 | `FAILED` |
@@ -653,10 +661,14 @@ Evidence 是运行结果的一部分。每次运行创建独立目录：
 artifacts/
 └── 20260814-xxxxxx/
     ├── <step>.png / <step>.xml
+    ├── <step>.json
     └── result.json
+
+logs/
+└── <workflow-started-timestamp>.log
 ```
 
-每个关键动作保留 Before、Action、After、Result；`result.json` 能反向定位 Observation、Action 和页面转换，并至少记录：
+终端和 `logs/<workflow-started-timestamp>.log` 记录 Workflow 起止、每次页面识别、识别依据、可用元素、动作名称、点击坐标和最终任务状态。日志文件名严格使用本次 Workflow 的 `started_at`。每个关键动作保留 Before、Action、After、Result；`result.json` 能反向定位 Observation、Action 和页面转换，并至少记录：
 
 ```text
 timestamp / device / package / activity
@@ -834,8 +846,12 @@ ADB
 | 页面 | 已知标识 | 可规划动作 |
 | --- | --- | --- |
 | `ALIPAY_HOME` | 蚂蚁庄园、蚂蚁森林 | 进入庄园/森林 |
-| `MANOR_HOME` | 蚂蚁庄园、家庭、去捐蛋 | 进入家庭或任务 |
-| `MANOR_FAMILY` | 欢乐全家桶、立即签到 | 签到 |
+| `MANOR_HOME` | 蚂蚁庄园标题 + 已登记 CV 模板 | 家庭、打赏、红点日记本 |
+| `MANOR_FAMILY` | 欢乐全家桶 + UI Tree/CV | 签到、打开任务面板、判断捐蛋完成状态 |
+| `MANOR_DONATION` | “我已助力”与“去捐蛋” | 选择首个公益项目 |
+| `MANOR_DONATION_PROJECT` | “我要捐赠”“当前还有”与“立即捐蛋” | 打开捐蛋确认页 |
+| `MANOR_DONATION_CONFIRM` | “捐爱心蛋”、数量单位与底部确认按钮 | 保持默认数量并确认 |
+| `MANOR_DONATION_REWARD` | “本次捐了”与“获取今日份幸运签” | 验证成功并返回 |
 
 页面规则必须经过真实取证后才可执行。
 
@@ -843,7 +859,7 @@ ADB
 
 ## 27. 当前未知状态
 
-签到结果、亲密度任务、捐蛋、小鸡状态和森林页面均属于未知状态。
+家庭捐步/请客、小鸡其他状态，以及本轮新增的饲料、轮盘、森林和能量雨在真机上出现的未登记变体均属于未知状态。
 处理流程：`Capture → 分析 → 增加规则 → Replay Test → 真机验证`。
 
 ---
@@ -852,9 +868,9 @@ ADB
 
 1. `ALIPAY_HOME → MANOR_HOME`
 2. `MANOR_HOME → MANOR_FAMILY → SIGN_IN → Verify`
-3. 增加捐蛋及其他庄园任务
+3. 增加家庭捐蛋（已完成）及其他庄园任务
 4. 处理小鸡雇佣和召回
-5. 开始 Forest Workflow
+5. 真机校准 Forest Workflow（录屏版已实现）
 
 ---
 
@@ -878,6 +894,8 @@ ADB
 进入家庭
     ↓
 执行签到或判断已签到
+    ↓
+执行每日捐蛋或判断已完成
     ↓
 验证最终状态
     ↓

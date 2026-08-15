@@ -2,8 +2,13 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+*.egg-info/
+/build/
 artifacts/*
 !artifacts/.gitkeep
+logs/*
+!logs/.gitkeep
 /legacy
 /.git-data
 config.toml
+/data/quiz_answers.json

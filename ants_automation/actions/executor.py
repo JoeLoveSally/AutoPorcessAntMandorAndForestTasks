@@ -11,9 +11,24 @@ class ActionExecutor:
         self.allowed_pages = allowed_pages or {
             PageType.ALIPAY_HOME,
             PageType.MANOR_HOME,
+            PageType.MANOR_FEED_TASKS,
+            PageType.MANOR_QUIZ,
+            PageType.MANOR_QUIZ_RESULT,
+            PageType.MANOR_FEED_VIDEO_COMPLETE,
+            PageType.MANOR_FEED_FULL,
             PageType.MANOR_FAMILY,
             PageType.MANOR_DONATION,
+            PageType.MANOR_DONATION_PROJECT,
+            PageType.MANOR_DONATION_CONFIRM,
+            PageType.MANOR_DONATION_REWARD,
+            PageType.LOTTERY,
+            PageType.LOTTERY_REWARD,
+            PageType.EXTERNAL_TASK_COMPLETE,
             PageType.FOREST_HOME,
+            PageType.FOREST_CO_PLANT,
+            PageType.FOREST_RAIN,
+            PageType.FOREST_RAIN_RESULT,
+            PageType.FOREST_FRIEND_PICKER,
         }
         self.results: list[ActionResult] = []
 
@@ -31,8 +46,8 @@ class ActionExecutor:
         self.results.append(result)
         return result
 
-    def back(self, page: DetectedPage) -> ActionResult:
-        name = "back"
+    def back(self, page: DetectedPage, action_name: str | None = None) -> ActionResult:
+        name = action_name or "back"
         try:
             self._validate_page(page)
             self.device.back()

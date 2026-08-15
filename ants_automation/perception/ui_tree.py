@@ -103,6 +103,10 @@ class UiTree:
             for node in self.nodes
         )
 
+    def contains_fragment(self, fragment: str) -> bool:
+        normalized = fragment.strip().lower()
+        return any(normalized in node.searchable_text for node in self.nodes)
+
     def visible_labels(self) -> tuple[str, ...]:
         values: list[str] = []
         for node in self.nodes:

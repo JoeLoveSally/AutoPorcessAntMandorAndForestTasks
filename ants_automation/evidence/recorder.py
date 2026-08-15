@@ -2,9 +2,27 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import logging
 from pathlib import Path
+from typing import Any
 
 from ..domain.models import Observation, RunResult
+
+
+class HumanRunLogger:
+    def __init__(self, directory: Path, started_at: datetime):
+        directory.mkdir(parents=True, exist_ok=True)
+        timestamp = started_at.strftime("%Y%m%d-%H%M%S-%f")
+        self.path = directory / f"{timestamp}.log"
+        self.logger = logging.getLogger("ants_automation")
+
+    def info(self, event: str, **fields: Any) -> None:
+        detail = " ".join(f"{key}={value!r}" for key, value in fields.items())
+        message = f"{event} {detail}".rstrip()
+        timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        with self.path.open("a", encoding="utf-8") as stream:
+            stream.write(f"{timestamp} INFO {message}\n")
+        self.logger.info(message)
 
 
 class EvidenceRecorder:

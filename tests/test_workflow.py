@@ -46,7 +46,42 @@ class FakeDevice:
         raise AssertionError("not used")
 
     def screen_size(self):
-        return (1080, 2400)
+        return (1440, 3200)
+
+
+class DonationFakeDevice(FakeDevice):
+    def dump_ui(self, destination):
+        source = {
+            "home": "alipay_home.xml",
+            "manor": "manor_home.xml",
+            "family": "manor_family.xml",
+            "tasks": "manor_family_tasks_pending.xml",
+            "donation": "manor_donation.xml",
+            "project": "manor_donation_project.xml",
+            "confirm": "manor_donation_confirm.xml",
+            "reward": "manor_donation_reward.xml",
+        }[self.state]
+        destination.write_bytes((FIXTURES / source).read_bytes())
+        return destination
+
+    def tap(self, point):
+        self.taps.append(point)
+        self.state = {
+            "home": "manor",
+            "manor": "family",
+            "family": "tasks",
+            "tasks": "donation",
+            "donation": "project",
+            "project": "confirm",
+            "confirm": "reward",
+        }[self.state]
+
+    def back(self):
+        self.state = {
+            "reward": "project",
+            "project": "donation",
+            "donation": "manor",
+        }[self.state]
 
 
 def test_manor_workflow_stops_without_guessing_sign_in_success(tmp_path):
@@ -54,6 +89,7 @@ def test_manor_workflow_stops_without_guessing_sign_in_success(tmp_path):
         device=DeviceConfig(),
         runtime=RuntimeConfig(
             artifacts_directory=tmp_path,
+            logs_directory=tmp_path / "logs",
             launch_wait_seconds=0,
             page_timeout_seconds=0.2,
             poll_interval_seconds=0.01,
@@ -64,3 +100,37 @@ def test_manor_workflow_stops_without_guessing_sign_in_success(tmp_path):
     assert result.error is not None
     assert result.evidence_directory is not None
     assert (result.evidence_directory / "result.json").is_file()
+    run_logs = list((tmp_path / "logs").glob("*.log"))
+    assert len(run_logs) == 1
+    assert run_logs[0].stem == result.started_at.strftime("%Y%m%d-%H%M%S-%f")
+    assert "workflow.finish" in run_logs[0].read_text(encoding="utf-8")
+    assert not (result.evidence_directory / "run.log").exists()
+    assert (result.evidence_directory / "004-sign_in_after.png").is_file()
+    assert (result.evidence_directory / "004-sign_in_after.xml").is_file()
+    assert (result.evidence_directory / "004-sign_in_after.json").is_file()
+
+
+def test_manor_workflow_completes_family_donation(tmp_path):
+    config = Config(
+        device=DeviceConfig(),
+        runtime=RuntimeConfig(
+            artifacts_directory=tmp_path,
+            logs_directory=tmp_path / "logs",
+            launch_wait_seconds=0,
+            page_timeout_seconds=0.2,
+            poll_interval_seconds=0.01,
+        ),
+    )
+
+    result = ManorDailyWorkflow.create(DonationFakeDevice(), config).run()
+
+    assert result.status is TaskStatus.SUCCESS
+    assert result.error is None
+    assert any(task.name == "family_sign_in" for task in result.tasks)
+    donation = next(task for task in result.tasks if task.name == "family_egg_donation")
+    assert donation.status is TaskStatus.SUCCESS
+    assert [action.name for action in result.actions][-3:] == [
+        "leave_donation_reward",
+        "leave_donation_project",
+        "leave_donation_projects",
+    ]

@@ -20,6 +20,9 @@ ants-auto = "ants_automation.cli:main"
 [tool.setuptools.packages.find]
 include = ["ants_automation*"]
 
+[tool.setuptools.package-data]
+"ants_automation.pages" = ["templates/*.png"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

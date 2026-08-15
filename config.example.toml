@@ -7,6 +7,17 @@ timeout_seconds = 20.0
 
 [runtime]
 artifacts_directory = "artifacts"
+logs_directory = "logs"
 launch_wait_seconds = 5.0
 page_timeout_seconds = 15.0
 poll_interval_seconds = 0.5
+external_task_timeout_seconds = 40.0
+external_swipe_interval_seconds = 3.0
+energy_rain_seconds = 24.0
+
+[quiz]
+search_url = "https://api.bochaai.com/v1/web-search"
+api_key_env = "WEB_SEARCH_API_KEY"
+# Optional local dotenv path containing the key. Keep the secret out of this file.
+env_file = ""
+cache_file = "data/quiz_answers.json"
