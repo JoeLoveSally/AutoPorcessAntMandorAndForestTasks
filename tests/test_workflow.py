@@ -19,6 +19,9 @@ class FakeDevice:
     def launch_package(self, package):
         assert package == "com.eg.android.AlipayGphone"
 
+    def force_stop_package(self, package):
+        assert package == "com.eg.android.AlipayGphone"
+
     def current_package_activity(self):
         return "com.eg.android.AlipayGphone", self.state
 
@@ -50,6 +53,10 @@ class FakeDevice:
 
 
 class DonationFakeDevice(FakeDevice):
+    def __init__(self):
+        super().__init__()
+        self.donation_finished = False
+
     def dump_ui(self, destination):
         source = {
             "home": "alipay_home.xml",
@@ -60,12 +67,17 @@ class DonationFakeDevice(FakeDevice):
             "project": "manor_donation_project.xml",
             "confirm": "manor_donation_confirm.xml",
             "reward": "manor_donation_reward.xml",
+            "family_signed": "manor_family_signed.xml",
+            "tasks_done": "manor_family_tasks_completed.xml",
         }[self.state]
         destination.write_bytes((FIXTURES / source).read_bytes())
         return destination
 
     def tap(self, point):
         self.taps.append(point)
+        if self.state == "manor" and self.donation_finished:
+            self.state = "tasks_done"
+            return
         self.state = {
             "home": "manor",
             "manor": "family",
@@ -77,6 +89,8 @@ class DonationFakeDevice(FakeDevice):
         }[self.state]
 
     def back(self):
+        if self.state == "donation":
+            self.donation_finished = True
         self.state = {
             "reward": "project",
             "project": "donation",
@@ -110,7 +124,7 @@ def test_manor_workflow_stops_without_guessing_sign_in_success(tmp_path):
     assert (result.evidence_directory / "004-sign_in_after.json").is_file()
 
 
-def test_manor_workflow_completes_family_donation(tmp_path):
+def test_manor_workflow_completes_family_donation_before_missing_feed_entry_stop(tmp_path):
     config = Config(
         device=DeviceConfig(),
         runtime=RuntimeConfig(
@@ -124,12 +138,16 @@ def test_manor_workflow_completes_family_donation(tmp_path):
 
     result = ManorDailyWorkflow.create(DonationFakeDevice(), config).run()
 
-    assert result.status is TaskStatus.SUCCESS
-    assert result.error is None
+    assert result.status is TaskStatus.FAILED
+    assert result.error == {
+        "type": "failed",
+        "message": "Family panel has no help-feed action or completed state",
+    }
     assert any(task.name == "family_sign_in" for task in result.tasks)
     donation = next(task for task in result.tasks if task.name == "family_egg_donation")
     assert donation.status is TaskStatus.SUCCESS
-    assert [action.name for action in result.actions][-3:] == [
+    names = [action.name for action in result.actions]
+    assert names[names.index("leave_donation_reward"):names.index("leave_donation_projects") + 1] == [
         "leave_donation_reward",
         "leave_donation_project",
         "leave_donation_projects",

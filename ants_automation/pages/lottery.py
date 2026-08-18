@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from ..domain.models import DetectedPage, Observation, PageType, UIElement
+from pathlib import Path
+import re
+
+from ..domain.models import Bounds, DetectedPage, Observation, PageType, UIElement
+from ..perception.vision import match_template
+
+
+_TEMPLATES = Path(__file__).with_name("templates")
 
 
 def _from_node(observation: Observation, key: str, node) -> UIElement:
@@ -19,7 +26,10 @@ def _find_action(observation: Observation, fragment: str, labels: tuple[str, ...
     tree = observation.ui_tree
     if tree is None:
         return None
-    tasks = [node for node in tree.nodes if fragment in (node.text or node.content_description)]
+    tasks = [
+        node for node in tree.nodes
+        if fragment in (node.text or node.content_description) and node.bounds.valid
+    ]
     actions = [
         node for node in tree.nodes
         if (node.text in labels or node.content_description in labels)
@@ -28,13 +38,28 @@ def _find_action(observation: Observation, fragment: str, labels: tuple[str, ...
     if not tasks or not actions:
         return None
     y = tasks[0].bounds.center[1]
-    return min(actions, key=lambda node: abs((node.action_bounds or node.bounds).center[1] - y))
+    selected = min(actions, key=lambda node: abs((node.action_bounds or node.bounds).center[1] - y))
+    if abs((selected.action_bounds or selected.bounds).center[1] - y) > 180:
+        return None
+    return selected
 
 
 def detect_lottery_reward(observation: Observation) -> DetectedPage | None:
     tree = observation.ui_tree
     if observation.package != "com.eg.android.AlipayGphone" or tree is None:
         return None
+    if tree.contains_fragment("件奖品") and tree.contains(("我知道了",)):
+        return DetectedPage(
+            PageType.LOTTERY_REWARD,
+            observation,
+            {"confirm_reward": UIElement(
+                "confirm_reward", "我知道了", Bounds(356, 2124, 1084, 2284),
+                True, True, "cv_layout:manor_lottery_reward_confirm",
+                observation.timestamp,
+            )},
+            ("labels=*件奖品,我知道了",),
+            1.0,
+        )
     if not any(tree.contains_fragment(label) for label in ("恭喜获得", "获得奖励", "恭喜抽中")):
         return None
     node = tree.find_exact(
@@ -44,18 +69,95 @@ def detect_lottery_reward(observation: Observation) -> DetectedPage | None:
     return DetectedPage(PageType.LOTTERY_REWARD, observation, elements, ("labels=reward",), 1.0)
 
 
+def detect_external_browse(observation: Observation) -> DetectedPage | None:
+    if observation.package != "com.eg.android.AlipayGphone" or observation.screenshot_path is None:
+        return None
+    complete = match_template(
+        observation.screenshot_path,
+        _TEMPLATES / "external_browse_complete.png",
+        threshold=0.9,
+    )
+    product_popup = match_template(
+        observation.screenshot_path,
+        _TEMPLATES / "product_quiz_popup.png",
+        threshold=0.9,
+    )
+    abandon = match_template(
+        observation.screenshot_path,
+        _TEMPLATES / "abandon_reward.png",
+        threshold=0.78,
+    )
+    if abandon is not None and not (
+        450 <= abandon.bounds.left <= 700
+        and 2600 <= abandon.bounds.top <= 2920
+    ):
+        abandon = None
+    if complete is None and product_popup is None and abandon is None:
+        return None
+    elements: dict[str, UIElement] = {}
+    if complete is not None:
+        elements["browse_complete"] = UIElement(
+            "browse_complete", None, complete.bounds, False, True,
+            "cv_template:external_browse_complete.png", observation.timestamp,
+        )
+    if product_popup is not None or abandon is not None:
+        elements["abandon_reward"] = UIElement(
+            "abandon_reward", "放弃奖励", Bounds(540, 2725, 900, 2875), True, True,
+            "cv_layout:product_quiz_popup.png", observation.timestamp,
+        )
+    evidence = tuple(
+        item for item in (
+            f"cv=external_browse_complete.png:{complete.confidence:.3f}" if complete else None,
+            f"cv=product_quiz_popup.png:{product_popup.confidence:.3f}"
+            if product_popup else None,
+            f"cv=abandon_reward.png:{abandon.confidence:.3f}" if abandon else None,
+        ) if item is not None
+    )
+    return DetectedPage(PageType.EXTERNAL_TASK_COMPLETE, observation, elements, evidence, 1.0)
+
+
 def detect_lottery(observation: Observation) -> DetectedPage | None:
     tree = observation.ui_tree
     if observation.package != "com.eg.android.AlipayGphone" or tree is None:
         return None
+    confirm_exchange = tree.find_exact(("确认兑换",), clickable_only=True)
+    if confirm_exchange is not None and tree.contains_fragment("消耗180g饲料"):
+        return DetectedPage(
+            PageType.LOTTERY,
+            observation,
+            {"confirm_exchange": _from_node(
+                observation, "confirm_exchange", confirm_exchange
+            )},
+            ("labels=消耗180g饲料,确认兑换",),
+            1.0,
+        )
+
     lottery_markers = ("立即抽奖", "抽奖", "抽抽乐", "森林寻宝", "剩余抽奖")
     if not any(tree.contains_fragment(marker) for marker in lottery_markers):
         return None
     elements: dict[str, UIElement] = {}
+    remaining = next(
+        (
+            match
+            for node in tree.nodes
+            if (match := re.search(r"还剩\s*(\d+)\s*次机会", node.text or node.content_description))
+        ),
+        None,
+    )
     no_draws = tree.contains_fragment("剩余0次") or tree.contains_fragment("0次抽奖")
     draw = None if no_draws else tree.find_exact(("立即抽奖", "抽奖"), clickable_only=True)
     if draw:
         elements["draw"] = _from_node(observation, "draw", draw)
+    elif remaining is not None and int(remaining.group(1)) > 0:
+        elements["draw"] = UIElement(
+            "draw", "立即抽奖", Bounds(430, 1830, 1010, 2070), True, True,
+            "cv_layout:manor_lottery_draw", observation.timestamp,
+        )
+    if remaining is not None:
+        elements["draw_count"] = UIElement(
+            "draw_count", remaining.group(1), Bounds(740, 1816, 1048, 1880),
+            False, True, "ui_tree_lottery_count", observation.timestamp,
+        )
     if no_draws:
         marker = next(
             node for node in tree.nodes
@@ -75,13 +177,26 @@ def detect_lottery(observation: Observation) -> DetectedPage | None:
         )
     if next_wheel:
         elements["next_wheel"] = _from_node(observation, "next_wheel", next_wheel)
-    for key, fragment in (
-        ("task_store", "去杂货铺逛一逛"),
-        ("task_market", "去森林集市逛一逛"),
+    exchange = _find_action(observation, "消耗饲料换机会", ("去完成",))
+    if exchange:
+        elements["exchange_feed"] = _from_node(
+            observation, "exchange_feed", exchange
+        )
+    daily_claim = _find_action(observation, "每日签到", ("领取",))
+    if daily_claim:
+        elements["claim_daily_chance"] = _from_node(
+            observation, "claim_daily_chance", daily_claim
+        )
+    for key, claim_key, fragment in (
+        ("task_store", "claim_task_store", "去杂货铺逛一逛"),
+        ("task_market", "claim_task_market", "去森林集市逛一逛"),
     ):
         node = _find_action(observation, fragment, ("去完成", "去逛逛"))
         if node:
             elements[key] = _from_node(observation, key, node)
+        claim = _find_action(observation, fragment, ("领取",))
+        if claim:
+            elements[claim_key] = _from_node(observation, claim_key, claim)
     return DetectedPage(
         PageType.LOTTERY,
         observation,

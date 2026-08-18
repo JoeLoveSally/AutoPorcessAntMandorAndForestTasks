@@ -17,6 +17,8 @@ class ActionExecutor:
             PageType.MANOR_FEED_VIDEO_COMPLETE,
             PageType.MANOR_FEED_FULL,
             PageType.MANOR_FAMILY,
+            PageType.MANOR_FAMILY_WALK,
+            PageType.MANOR_WALK_DONATION,
             PageType.MANOR_DONATION,
             PageType.MANOR_DONATION_PROJECT,
             PageType.MANOR_DONATION_CONFIRM,

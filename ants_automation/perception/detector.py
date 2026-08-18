@@ -8,12 +8,14 @@ from ..pages.manor import (
     detect_donation_project,
     detect_donation_reward,
     detect_family,
+    detect_family_walk,
     detect_feed_tasks,
     detect_feed_full,
     detect_feed_video_complete,
     detect_manor_home,
     detect_quiz,
     detect_quiz_result,
+    detect_walk_donation,
 )
 from ..pages.forest import (
     detect_co_plant,
@@ -22,13 +24,14 @@ from ..pages.forest import (
     detect_forest_rain,
     detect_forest_rain_result,
 )
-from ..pages.lottery import detect_lottery, detect_lottery_reward
+from ..pages.lottery import detect_external_browse, detect_lottery, detect_lottery_reward
 
 
 class PageDetector:
     def detect(self, observation: Observation) -> DetectedPage:
         for detector in (
             detect_home,
+            detect_external_browse,
             detect_lottery_reward,
             detect_feed_video_complete,
             detect_feed_full,
@@ -39,6 +42,8 @@ class PageDetector:
             detect_donation_confirm,
             detect_donation_project,
             detect_donation,
+            detect_walk_donation,
+            detect_family_walk,
             detect_family,
             detect_manor_home,
             detect_forest_rain_result,

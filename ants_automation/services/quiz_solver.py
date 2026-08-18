@@ -41,7 +41,9 @@ class WebQuizSolver:
             raise AutomationError(
                 f"Quiz search key is missing: {self.config.api_key_env}"
             )
-        query = f"蚂蚁庄园 今日答案 {question} {' '.join(options)}"
+        # Keep candidate text out of the query. Search engines often echo the
+        # whole query into snippets, which gives both options artificial hits.
+        query = f"蚂蚁庄园 {question} 正确答案"
         request = urllib.request.Request(
             self.config.search_url,
             data=json.dumps(

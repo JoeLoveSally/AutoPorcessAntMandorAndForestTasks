@@ -31,12 +31,15 @@ def _vision_element(
     observation: Observation,
     key: str,
     template_name: str,
+    *,
+    threshold: float = 0.9,
 ) -> tuple[UIElement, float] | None:
     if observation.screenshot_path is None:
         return None
     match = match_template(
         observation.screenshot_path,
         _TEMPLATES / template_name,
+        threshold=threshold,
     )
     if match is None:
         return None
@@ -245,19 +248,53 @@ def detect_feed_tasks(observation: Observation) -> DetectedPage | None:
 def detect_feed_video_complete(observation: Observation) -> DetectedPage | None:
     if observation.package != "com.eg.android.AlipayGphone":
         return None
-    complete = _vision_action_element(
-        observation,
-        "video_complete_marker",
-        "feed_video_complete.png",
+    popup = _vision_element(
+        observation, "dismiss_video_popup", "feed_video_reward_popup.png"
     )
+    complete = _vision_element(
+        observation, "video_complete_marker", "feed_video_complete_1440.png"
+    ) or _vision_element(
+        observation, "video_complete_marker", "feed_video_complete_clear_1440.png"
+    ) or _vision_element(
+        observation, "video_complete_marker", "feed_video_complete.png"
+    )
+    # The orange popup button alone is not distinctive enough: donation pages
+    # use the same style. A video overlay is valid only with the completion badge.
     if complete is None:
         return None
-    _, complete_confidence = complete
+    elements = {}
+    evidence = []
+    if popup is not None:
+        _, confidence = popup
+        elements["dismiss_video_popup"] = UIElement(
+            key="dismiss_video_popup",
+            text=None,
+            bounds=Bounds(1080, 1030, 1200, 1190),
+            clickable=True,
+            enabled=True,
+            source="cv_layout:feed_video_reward_popup.png",
+            observation_timestamp=observation.timestamp,
+        )
+        evidence.append(f"cv=feed_video_reward_popup.png:{confidence:.3f}")
+    elif complete is not None:
+        marker, confidence = complete
+        elements[marker.key] = marker
+        elements["leave_video"] = UIElement(
+            key="leave_video",
+            text=None,
+            bounds=Bounds(20, 160, 170, 360),
+            clickable=True,
+            enabled=True,
+            source="cv_layout:video_back",
+            observation_timestamp=observation.timestamp,
+        )
+        evidence.append(f"cv=feed_video_complete:{confidence:.3f}")
     return DetectedPage(
         type=PageType.MANOR_FEED_VIDEO_COMPLETE,
         observation=observation,
-        evidence=(f"cv=feed_video_complete.png:{complete_confidence:.3f}",),
-        confidence=complete_confidence,
+        elements=elements,
+        evidence=tuple(evidence),
+        confidence=1.0,
     )
 
 
@@ -342,7 +379,10 @@ def detect_donation_project(observation: Observation) -> DetectedPage | None:
     if (
         not tree.contains(("我要捐赠",))
         or not tree.contains(("立即捐蛋",))
-        or not tree.contains_fragment("当前还有")
+        or not (
+            tree.contains_fragment("当前还有")
+            or tree.contains_fragment("当前进度")
+        )
     ):
         return None
     elements = {}
@@ -353,7 +393,7 @@ def detect_donation_project(observation: Observation) -> DetectedPage | None:
         type=PageType.MANOR_DONATION_PROJECT,
         observation=observation,
         elements=elements,
-        evidence=("labels=我要捐赠,立即捐蛋,当前还有*",),
+        evidence=("labels=我要捐赠,立即捐蛋,当前还有*|当前进度*",),
         confidence=1.0 if donate_now else 0.8,
     )
 
@@ -404,6 +444,50 @@ def detect_donation_reward(observation: Observation) -> DetectedPage | None:
     )
 
 
+def detect_family_walk(observation: Observation) -> DetectedPage | None:
+    tree = observation.ui_tree
+    if observation.package != "com.eg.android.AlipayGphone" or tree is None:
+        return None
+    if not tree.contains(("一起运动做公益",)) or not tree.contains_fragment("今日全家累计步数"):
+        return None
+    elements = {}
+    donate = _label_element(observation, "donate_steps", "去捐步数")
+    done = _fragment_marker(observation, "walk_done", "今日已完成捐步")
+    close = _element(observation, "close", "关闭")
+    for item in (donate, done, close):
+        if item:
+            elements[item.key] = item
+    return DetectedPage(
+        PageType.MANOR_FAMILY_WALK,
+        observation,
+        elements,
+        ("labels=一起运动做公益,今日全家累计步数*",),
+        1.0,
+    )
+
+
+def detect_walk_donation(observation: Observation) -> DetectedPage | None:
+    tree = observation.ui_tree
+    if observation.package != "com.eg.android.AlipayGphone" or tree is None:
+        return None
+    if not tree.contains(("行走捐",)):
+        return None
+    elements = {}
+    donate = _label_element(observation, "donate_now", "立即捐步")
+    dismiss = _label_element(observation, "dismiss_result", "知道了")
+    done = _fragment_marker(observation, "walk_donated", "今日兑换公益金")
+    for item in (donate, dismiss, done):
+        if item:
+            elements[item.key] = item
+    return DetectedPage(
+        PageType.MANOR_WALK_DONATION,
+        observation,
+        elements,
+        ("labels=行走捐",),
+        1.0,
+    )
+
+
 def detect_family(observation: Observation) -> DetectedPage | None:
     tree = observation.ui_tree
     if observation.package != "com.eg.android.AlipayGphone" or tree is None:
@@ -413,14 +497,48 @@ def detect_family(observation: Observation) -> DetectedPage | None:
     elements = {}
     evidence = ["labels=欢乐全家桶"]
     sign_in = _element(observation, "sign_in", "立即签到")
+    signed = _element(observation, "signed", "攒亲密度")
     donate = _element(observation, "donate", "去捐蛋")
     donation_done = _fragment_marker(
         observation,
         "donation_done",
         "每日捐蛋做好事(1/1)",
     )
+    family_feed = _task_action_element(
+        observation, "family_feed_task", "帮喂家人小鸡(0/1)", "去喂食"
+    )
+    family_feed_done = _fragment_marker(observation, "family_feed_done", "帮喂家人小鸡(1/1)")
+    walk = _task_action_element(
+        observation, "walk_task", "一起运动做公益(0/1)", "去捐步"
+    )
+    walk_done = _fragment_marker(observation, "walk_done", "一起运动做公益(1/1)")
+    meal = _task_action_element(
+        observation, "meal_task", "请家人吃一顿美食", "去请客"
+    )
+    meal_unavailable = None
+    if tree.contains_fragment("请家人吃一顿美食") and meal is None:
+        meal_unavailable = _fragment_marker(observation, "meal_unavailable", "请家人吃一顿美食")
+    confirm_family_feed = next(
+        (node for node in tree.nodes
+         if (node.text or node.content_description).startswith("确认")
+         and "亲密度+1" in (node.text or node.content_description)
+         and node.enabled and node.bounds.valid),
+        None,
+    )
+    if confirm_family_feed is not None:
+        elements["confirm_family_feed"] = _node_element(
+            observation, "confirm_family_feed", confirm_family_feed,
+            source="ui_tree_family_feed_confirm",
+        )
+    if tree.contains_fragment("已选") and tree.contains(("亲密度+3",)):
+        confirm_meal = _label_element(observation, "confirm_meal", "确认")
+        if confirm_meal is not None:
+            elements[confirm_meal.key] = confirm_meal
     close = _element(observation, "close", "关闭")
-    for item in (sign_in, donate, donation_done, close):
+    for item in (
+        sign_in, signed, donate, donation_done, family_feed, family_feed_done,
+        walk, walk_done, meal, meal_unavailable, close,
+    ):
         if item:
             elements[item.key] = item
     if "sign_in" not in elements:
@@ -479,7 +597,8 @@ def detect_manor_home(observation: Observation) -> DetectedPage | None:
         ("diary", "manor_diary_badge.png"),
         ("feed_tasks", "manor_feed_tasks.png"),
     ):
-        match = _vision_element(observation, key, template_name)
+        threshold = 0.86 if key in {"reward", "feed_tasks"} else 0.9
+        match = _vision_element(observation, key, template_name, threshold=threshold)
         if match:
             element, confidence = match
             elements[element.key] = element

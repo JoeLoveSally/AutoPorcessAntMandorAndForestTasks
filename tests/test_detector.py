@@ -44,7 +44,7 @@ def test_detector_recognizes_known_pages():
     ]
     video_complete = detector.detect(observation("manor_feed_video_complete.xml"))
     assert video_complete.type is PageType.MANOR_FEED_VIDEO_COMPLETE
-    assert video_complete.elements == {}
+    assert "dismiss_video_popup" in video_complete.elements
     quiz = detector.detect(observation("manor_quiz.xml"))
     assert quiz.type is PageType.MANOR_QUIZ
     assert quiz.elements["answer_a"].text == "是，越冰越好"

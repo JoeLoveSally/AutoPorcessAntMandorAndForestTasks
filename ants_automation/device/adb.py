@@ -21,6 +21,7 @@ class AndroidDevice(Protocol):
     serial: str
 
     def launch_package(self, package: str) -> None: ...
+    def force_stop_package(self, package: str) -> None: ...
     def current_package_activity(self) -> tuple[str | None, str | None]: ...
     def screenshot(self, destination: Path) -> Path: ...
     def screenshot_bytes(self) -> bytes: ...
@@ -106,6 +107,9 @@ class AdbDevice:
         started = self.shell("am", "start", "-W", "-n", component)
         if "Error:" in started or "Exception" in started:
             raise LaunchError(started.strip())
+
+    def force_stop_package(self, package: str) -> None:
+        self.shell("am", "force-stop", package)
 
     def current_package_activity(self) -> tuple[str | None, str | None]:
         output = self.shell("dumpsys", "activity", "activities")

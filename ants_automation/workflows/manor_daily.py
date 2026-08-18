@@ -45,6 +45,7 @@ class ManorDailyWorkflow:
         self._log("workflow.start", workflow=result.workflow, device=self.device.serial)
         try:
             self._log("app.launch", package=self.config.package)
+            self.device.force_stop_package(self.config.package)
             self.device.launch_package(self.config.package)
             time.sleep(self.config.runtime.launch_wait_seconds)
             home = self._capture_page("alipay_home")
@@ -67,6 +68,10 @@ class ManorDailyWorkflow:
                     return self._finish(result, TaskStatus.FAILED, diary_action.error)
                 time.sleep(self.config.runtime.poll_interval_seconds)
                 diary_after = self._capture_page("diary_after")
+                # The diary exposes its UI tree before its slide-in animation has
+                # settled. Returning during that window can leave both canvases
+                # half visible and shift every visual locator on the Manor page.
+                time.sleep(max(2.0, self.config.runtime.poll_interval_seconds * 4))
                 result.tasks.append(
                     TaskResult("open_diary", TaskStatus.SUCCESS, "red-dot diary opened")
                 )
@@ -74,7 +79,11 @@ class ManorDailyWorkflow:
                 self._record_action(result, back)
                 if back.status.value != "executed":
                     return self._finish(result, TaskStatus.FAILED, back.error)
-                manor = self._wait_for_page(PageType.MANOR_HOME, "manor_after_diary")
+                manor = self._wait_for_page(
+                    PageType.MANOR_HOME,
+                    "manor_after_diary",
+                    required_elements=("family", "feed_tasks"),
+                )
             else:
                 result.tasks.append(TaskResult("open_diary", TaskStatus.SKIPPED, "no red-dot diary"))
             manor = self._handle_feed_rewards(result, manor)
@@ -122,10 +131,11 @@ class ManorDailyWorkflow:
                 )
                 sign_status = TaskStatus.SUCCESS
 
-            donation_status = self._handle_family_donation(result, family_tasks)
-            manor = self._capture_page("manor_after_family")
-            if manor.type is not PageType.MANOR_HOME:
-                return self._finish(result, TaskStatus.UNKNOWN, "Did not return to Manor after family")
+            donation_status, family_tasks = self._handle_family_donation(result, family_tasks)
+            family_tasks = self._handle_family_task_feed(result, family_tasks)
+            family_tasks = self._handle_family_walk(result, family_tasks)
+            family_tasks = self._handle_family_meal(result, family_tasks)
+            manor = self._leave_family(result, family_tasks)
             self._handle_feed_tasks(result, manor)
             final_status = (
                 TaskStatus.SUCCESS
@@ -213,18 +223,22 @@ class ManorDailyWorkflow:
 
     def _handle_feed_tasks(self, result: RunResult, manor: DetectedPage) -> None:
         if "feed_tasks" not in manor.elements:
-            result.tasks.append(TaskResult("feed_tasks", TaskStatus.SKIPPED, "entry not visible"))
-            return
+            raise AutomationError("Manor feed-task entry was not recognized")
         page = self._tap_and_wait(
             result, manor, "feed_tasks", "open_feed_tasks", PageType.MANOR_FEED_TASKS,
-            "feed_tasks", required_any_elements=("claim_daily", "daily_claim_done", "quiz", "video"),
+            "feed_tasks", required_any_elements=(
+                "claim_daily", "daily_claim_done", "quiz", "claim_quiz_reward",
+                "video", "claim_video_reward", "lottery_0",
+            ),
         )
         if "claim_daily" in page.elements:
             page = self._claim_feed(result, page, "claim_daily", "daily_feed")
         else:
             result.tasks.append(TaskResult("daily_feed", TaskStatus.ALREADY_DONE, "already claimed"))
 
-        if "quiz" in page.elements:
+        if "claim_quiz_reward" in page.elements:
+            page = self._claim_feed(result, page, "claim_quiz_reward", "quiz_feed")
+        elif "quiz" in page.elements:
             quiz = self._tap_and_wait(
                 result, page, "quiz", "open_quiz", PageType.MANOR_QUIZ, "quiz",
                 required_elements=("answer_a", "answer_b"),
@@ -244,13 +258,15 @@ class ManorDailyWorkflow:
             )
             page = self._tap_and_wait(
                 result, quiz_result, "claim_quiz_feed", "leave_quiz", PageType.MANOR_FEED_TASKS,
-                "feed_tasks_after_quiz",
+                "feed_tasks_after_quiz", required_elements=("claim_quiz_reward",),
             )
             page = self._claim_feed(result, page, "claim_quiz_reward", "quiz_feed")
         else:
             result.tasks.append(TaskResult("quiz", TaskStatus.ALREADY_DONE, "quiz action not present"))
 
-        if "video" in page.elements:
+        if "claim_video_reward" in page.elements:
+            page = self._claim_feed(result, page, "claim_video_reward", "video_feed")
+        elif "video" in page.elements:
             action = self.actions.tap(page, "video", "open_feed_video")
             self._record_action(result, action)
             complete = self._wait_for_page(
@@ -258,9 +274,23 @@ class ManorDailyWorkflow:
                 "feed_video_complete",
                 timeout_seconds=self.config.runtime.external_task_timeout_seconds,
             )
-            back = self.actions.back(complete, "leave_feed_video")
-            self._record_action(result, back)
-            page = self._wait_for_page(PageType.MANOR_FEED_TASKS, "feed_tasks_after_video")
+            if "dismiss_video_popup" in complete.elements:
+                dismiss = self.actions.tap(
+                    complete, "dismiss_video_popup", "dismiss_feed_video_popup"
+                )
+                self._record_action(result, dismiss)
+                if dismiss.status.value != "executed":
+                    raise AutomationError(dismiss.error or "Unable to dismiss video reward popup")
+                complete = self._wait_for_page(
+                    PageType.MANOR_FEED_VIDEO_COMPLETE,
+                    "feed_video_complete_clear",
+                    required_elements=("leave_video",),
+                )
+            page = self._tap_and_wait(
+                result, complete, "leave_video", "leave_feed_video",
+                PageType.MANOR_FEED_TASKS, "feed_tasks_after_video",
+                required_elements=("claim_video_reward",),
+            )
             page = self._claim_feed(result, page, "claim_video_reward", "video_feed")
         else:
             result.tasks.append(TaskResult("feed_video", TaskStatus.ALREADY_DONE, "video action not present"))
@@ -275,6 +305,7 @@ class ManorDailyWorkflow:
         self._record_action(result, action)
         if action.status.value != "executed":
             raise AutomationError(action.error or f"Unable to {name}")
+        time.sleep(max(2.0, self.config.runtime.poll_interval_seconds * 4))
         after = self._capture_page(f"{name}_after")
         if after.type is PageType.MANOR_FEED_FULL:
             decline = self.actions.back(after, f"{name}_decline_overflow")
@@ -311,7 +342,11 @@ class ManorDailyWorkflow:
                 result, current, key, f"open_manor_lottery_{len(processed) + 1}",
                 PageType.LOTTERY, f"manor_lottery_{len(processed) + 1}",
             )
-            runner.run(result, lottery, "task_store", f"manor_lottery_{len(processed) + 1}", 3)
+            runner.run(
+                result, lottery, "task_store",
+                f"manor_lottery_{len(processed) + 1}", 3,
+                exchange_feed=True,
+            )
             processed.add(identity)
             back = self.actions.back(lottery, f"leave_manor_lottery_{len(processed)}")
             self._record_action(result, back)
@@ -326,12 +361,12 @@ class ManorDailyWorkflow:
         self,
         result: RunResult,
         family_tasks: DetectedPage,
-    ) -> TaskStatus:
+    ) -> tuple[TaskStatus, DetectedPage]:
         if "donation_done" in family_tasks.elements:
             result.tasks.append(
                 TaskResult("family_egg_donation", TaskStatus.ALREADY_DONE, "already donated today")
             )
-            return TaskStatus.ALREADY_DONE
+            return TaskStatus.ALREADY_DONE, family_tasks
         if "donate" not in family_tasks.elements:
             raise AutomationError("Family task panel has no donation action or completed state")
 
@@ -390,7 +425,7 @@ class ManorDailyWorkflow:
             "donation_projects_after_reward",
             required_elements=("select_project",),
         )
-        self._back_and_wait(
+        manor = self._back_and_wait(
             result,
             projects,
             "leave_donation_projects",
@@ -398,7 +433,129 @@ class ManorDailyWorkflow:
             "manor_after_donation",
             required_elements=("family",),
         )
-        return TaskStatus.SUCCESS
+        return TaskStatus.SUCCESS, self._open_family_tasks_from_manor(result, manor)
+
+    def _open_family_tasks_from_manor(
+        self, result: RunResult, manor: DetectedPage
+    ) -> DetectedPage:
+        family = self._tap_and_wait(
+            result, manor, "family", "reopen_family_after_donation",
+            PageType.MANOR_FAMILY, "family_after_donation",
+            required_any_elements=("signed", "sign_in", "close"),
+        )
+        if "close" in family.elements:
+            return family
+        if "signed" not in family.elements:
+            raise AutomationError("Family sign-in state disappeared after donation")
+        return self._tap_and_wait(
+            result, family, "signed", "reopen_family_tasks_after_donation",
+            PageType.MANOR_FAMILY, "family_tasks_after_donation",
+            required_elements=("close",),
+        )
+
+    def _handle_family_task_feed(
+        self, result: RunResult, family_tasks: DetectedPage
+    ) -> DetectedPage:
+        if "family_feed_done" in family_tasks.elements:
+            result.tasks.append(TaskResult(
+                "family_help_feed", TaskStatus.ALREADY_DONE, "already helped feed today"
+            ))
+            return family_tasks
+        if "family_feed_task" not in family_tasks.elements:
+            raise AutomationError("Family panel has no help-feed action or completed state")
+        confirm = self._tap_and_wait(
+            result, family_tasks, "family_feed_task", "open_family_help_feed",
+            PageType.MANOR_FAMILY, "family_help_feed_confirm",
+            required_elements=("confirm_family_feed",),
+        )
+        after = self._tap_and_wait(
+            result, confirm, "confirm_family_feed", "confirm_family_help_feed",
+            PageType.MANOR_FAMILY, "family_help_feed_after",
+            required_elements=("family_feed_done",),
+        )
+        result.tasks.append(TaskResult(
+            "family_help_feed", TaskStatus.SUCCESS, "fed the selected family chicken"
+        ))
+        return after
+
+    def _handle_family_walk(
+        self, result: RunResult, family_tasks: DetectedPage
+    ) -> DetectedPage:
+        if "walk_done" in family_tasks.elements:
+            result.tasks.append(TaskResult(
+                "family_walk_donation", TaskStatus.ALREADY_DONE, "already donated steps today"
+            ))
+            return family_tasks
+        if "walk_task" not in family_tasks.elements:
+            raise AutomationError("Family panel has no walk-donation action or completed state")
+        walk = self._tap_and_wait(
+            result, family_tasks, "walk_task", "open_family_walk",
+            PageType.MANOR_FAMILY_WALK, "family_walk", required_elements=("donate_steps",),
+        )
+        donation = self._tap_and_wait(
+            result, walk, "donate_steps", "open_walk_donation",
+            PageType.MANOR_WALK_DONATION, "walk_donation", required_elements=("donate_now",),
+        )
+        result_page = self._tap_and_wait(
+            result, donation, "donate_now", "donate_steps_now",
+            PageType.MANOR_WALK_DONATION, "walk_donation_result",
+            required_elements=("walk_donated",),
+        )
+        if "dismiss_result" in result_page.elements:
+            dismiss = self.actions.tap(result_page, "dismiss_result", "dismiss_walk_result")
+            self._record_action(result, dismiss)
+            if dismiss.status.value != "executed":
+                raise AutomationError(dismiss.error or "Unable to dismiss walk result")
+            result_page = self._wait_for_page(
+                PageType.MANOR_WALK_DONATION, "walk_result_dismissed",
+                required_elements=("walk_donated",),
+            )
+        walk_done = self._back_and_wait(
+            result, result_page, "leave_walk_donation", PageType.MANOR_FAMILY_WALK,
+            "family_walk_done", required_elements=("walk_done",),
+        )
+        tasks = self._back_to_family_tasks(
+            result, walk_done, "leave_family_walk", "family_tasks_after_walk"
+        )
+        result.tasks.append(TaskResult(
+            "family_walk_donation", TaskStatus.SUCCESS, "donated today's available steps"
+        ))
+        return tasks
+
+    def _handle_family_meal(
+        self, result: RunResult, family_tasks: DetectedPage
+    ) -> DetectedPage:
+        if "meal_task" in family_tasks.elements:
+            confirm = self._tap_and_wait(
+                result, family_tasks, "meal_task", "open_family_meal",
+                PageType.MANOR_FAMILY, "family_meal_confirm",
+                required_elements=("confirm_meal",),
+            )
+            after = self._tap_and_wait(
+                result, confirm, "confirm_meal", "confirm_family_meal",
+                PageType.MANOR_FAMILY, "family_meal_after",
+                required_elements=("meal_unavailable",),
+            )
+            result.tasks.append(TaskResult(
+                "family_meal", TaskStatus.SUCCESS,
+                "served the default four meals without sending a reminder",
+            ))
+            return after
+        result.tasks.append(TaskResult(
+            "family_meal", TaskStatus.SKIPPED, "meal task currently shows an unavailable state"
+        ))
+        return family_tasks
+
+    def _leave_family(self, result: RunResult, family_tasks: DetectedPage) -> DetectedPage:
+        family = self._tap_and_wait(
+            result, family_tasks, "close", "close_family_tasks",
+            PageType.MANOR_FAMILY, "family_home_after_tasks",
+            required_any_elements=("signed", "sign_in"),
+        )
+        return self._back_and_wait(
+            result, family, "leave_family", PageType.MANOR_HOME,
+            "manor_after_family", required_elements=("family", "feed_tasks"),
+        )
 
     def _tap_and_wait(
         self,
@@ -409,6 +566,7 @@ class ManorDailyWorkflow:
         expected: PageType,
         observation_name: str,
         required_elements: tuple[str, ...] = (),
+        required_any_elements: tuple[str, ...] = (),
     ) -> DetectedPage:
         action = self.actions.tap(page, element_key, action_name)
         self._record_action(result, action)
@@ -418,6 +576,7 @@ class ManorDailyWorkflow:
             expected,
             observation_name,
             required_elements=required_elements,
+            required_any_elements=required_any_elements,
         )
 
     def _back_and_wait(
@@ -444,8 +603,52 @@ class ManorDailyWorkflow:
             PageType.MANOR_FAMILY,
             name,
             required_elements=("close",),
-            required_any_elements=("donate", "donation_done"),
+            required_any_elements=(
+                "donate", "donation_done", "family_feed_task", "family_feed_done",
+                "walk_task", "walk_done",
+            ),
         )
+
+    def _back_to_family_tasks(
+        self,
+        result: RunResult,
+        page: DetectedPage,
+        action_name: str,
+        observation_name: str,
+    ) -> DetectedPage:
+        action = self.actions.back(page, action_name)
+        self._record_action(result, action)
+        if action.status.value != "executed":
+            raise AutomationError(action.error or f"Action failed: {action_name}")
+
+        latest: DetectedPage | None = None
+
+        def observe():
+            nonlocal latest
+            latest = self._capture_page(observation_name)
+            return latest.observation
+
+        def matches(_observation) -> bool:
+            if latest is None:
+                return False
+            if latest.type is PageType.MANOR_FAMILY:
+                return "close" in latest.elements
+            return (
+                latest.type is PageType.MANOR_HOME
+                and "family" in latest.elements
+                and "feed_tasks" in latest.elements
+            )
+
+        wait_until(
+            observe,
+            matches,
+            self.config.runtime.page_timeout_seconds,
+            self.config.runtime.poll_interval_seconds,
+        )
+        assert latest is not None
+        if latest.type is PageType.MANOR_HOME:
+            return self._open_family_tasks_from_manor(result, latest)
+        return latest
 
     def _wait_for_optional_element(
         self,

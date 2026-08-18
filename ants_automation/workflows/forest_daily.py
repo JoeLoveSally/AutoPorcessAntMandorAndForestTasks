@@ -41,6 +41,7 @@ class ForestDailyWorkflow:
         result.evidence_directory = self.run_directory
         self._log("workflow.start", workflow=result.workflow, device=self.device.serial)
         try:
+            self.device.force_stop_package(self.config.package)
             self.device.launch_package(self.config.package)
             time.sleep(self.config.runtime.launch_wait_seconds)
             home = self._capture_page("alipay_home")
@@ -49,6 +50,11 @@ class ForestDailyWorkflow:
             forest = self._tap_and_wait(
                 result, home, "forest", "open_forest", PageType.FOREST_HOME, "forest_home"
             )
+            # Forest publishes its accessibility tree while the green loading
+            # canvas is still visible. Wait for that transition before energy
+            # detection, otherwise decorative loading balls look actionable.
+            time.sleep(max(5.0, self.config.runtime.poll_interval_seconds * 4))
+            forest = self._wait_for_page(PageType.FOREST_HOME, "forest_home_stable")
             lottery = self._collect_friend_energy(result, forest)
             forest = self._handle_forest_lotteries(result, lottery)
             forest = self._handle_energy_rain(result, forest)
