@@ -41,10 +41,10 @@ def test_lottery_reward_detector_accepts_continue_button():
     assert "confirm_reward" in page.elements
 
 
-def test_lottery_reward_detector_accepts_ten_draw_acknowledgement():
+def test_lottery_reward_detector_accepts_any_prize_count_acknowledgement():
     page = PageDetector().detect(_observation(
         ("抽抽乐", False, "[0,100][400,200]"),
-        ("10件奖品", False, "[0,580][1440,956]"),
+        ("3件奖品", False, "[0,580][1440,956]"),
         ("我知道了", False, "[356,2124][1084,2284]"),
     ))
     assert page.type is PageType.LOTTERY_REWARD
