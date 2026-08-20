@@ -99,9 +99,28 @@ def detect_co_plant(observation: Observation) -> DetectedPage | None:
     if not tree.contains_fragment("爱情合种"):
         return None
     elements = {}
-    amount = _element(observation, "amount_100", ("100g", "100克"), True)
-    water = _element(observation, "water", ("浇水", "立即浇水"), True)
-    for item in (amount, water):
+    water = _element(observation, "water", ("为爱浇灌", "浇水", "立即浇水"), True)
+    confirm = _element(observation, "confirm_water", ("浇水", "立即浇水"), False)
+    increase = _element(observation, "increase_amount", ("+", "增加"), False)
+    reward = _element(observation, "reward_ack", ("我知道啦", "我知道了", "收下"), False)
+    amount_nodes = [
+        node for node in tree.nodes
+        if (node.text or node.content_description).strip() in {"20", "40", "60", "80", "100"}
+        and node.bounds.valid
+    ]
+    amount_node = None
+    if amount_nodes and increase is not None:
+        amount_node = min(
+            amount_nodes,
+            key=lambda node: abs(node.bounds.center[1] - increase.bounds.center[1]),
+        )
+    amount = None
+    if amount_node is not None:
+        amount = UIElement(
+            "amount_value", amount_node.text or amount_node.content_description,
+            amount_node.bounds, False, True, "ui_tree_forest", observation.timestamp,
+        )
+    for item in (water, confirm, increase, reward, amount):
         if item:
             elements[item.key] = item
     return DetectedPage(PageType.FOREST_CO_PLANT, observation, elements, ("labels=爱情合种",), 1.0)

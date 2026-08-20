@@ -32,6 +32,17 @@ def test_lottery_detector_finds_market_task_draw_and_next_wheel():
     assert {"task_market", "draw", "next_wheel"} <= page.elements.keys()
 
 
+def test_lottery_detector_marks_browse_task_complete_from_progress():
+    page = PageDetector().detect(_observation(
+        ("抽抽乐", False, "[0,100][400,200]"),
+        ("去杂货铺逛一逛（3/3）", False, "[50,1200][800,1300]"),
+        ("立即抽奖", True, "[300,700][900,900]"),
+    ))
+    assert page.type is PageType.LOTTERY
+    assert "task_store" not in page.elements
+    assert "task_store_done" in page.elements
+
+
 def test_lottery_reward_detector_accepts_continue_button():
     page = PageDetector().detect(_observation(
         ("恭喜抽中20g能量", False, "[200,700][1000,900]"),
@@ -90,6 +101,28 @@ def test_lottery_detector_recognizes_feed_exchange_confirmation():
     assert page.elements["confirm_exchange"].center == (944, 1758)
 
 
+def test_lottery_detector_recognizes_completed_feed_exchange():
+    page = PageDetector().detect(_observation(
+        ("抽抽乐", False, "[0,100][400,200]"),
+        ("消耗饲料换机会", False, "[320,2976][1080,3040]"),
+        ("已完成", False, "[1104,3000][1340,3096]"),
+    ))
+    assert page.type is PageType.LOTTERY
+    assert "exchange_feed" not in page.elements
+    assert "exchange_feed_done" in page.elements
+
+
+def test_lottery_detector_recognizes_completed_daily_chance():
+    page = PageDetector().detect(_observation(
+        ("抽抽乐", False, "[0,100][400,200]"),
+        ("每日签到", False, "[320,2468][1080,2532]"),
+        ("已完成", False, "[1104,2492][1340,2592]"),
+    ))
+    assert page.type is PageType.LOTTERY
+    assert "claim_daily_chance" not in page.elements
+    assert "daily_chance_done" in page.elements
+
+
 def test_energy_rain_intro_detector_accepts_open_button():
     page = PageDetector().detect(_observation(
         ("天天能量雨", False, "[200,700][1000,900]"),
@@ -97,3 +130,22 @@ def test_energy_rain_intro_detector_accepts_open_button():
     ))
     assert page.type is PageType.FOREST_RAIN
     assert "start" in page.elements
+
+
+def test_co_plant_detector_recognizes_100g_dialog_and_reward():
+    dialog = PageDetector().detect(_observation(
+        ("爱情合种", False, "[0,100][400,200]"),
+        ("100", False, "[600,1600][800,1700]"),
+        ("+", True, "[900,1550][1050,1720]"),
+        ("浇水", True, "[300,1900][1100,2100]"),
+    ))
+    assert dialog.type is PageType.FOREST_CO_PLANT
+    assert dialog.elements["amount_value"].text == "100"
+    assert {"increase_amount", "confirm_water"} <= dialog.elements.keys()
+
+    reward = PageDetector().detect(_observation(
+        ("爱情合种", False, "[0,100][400,200]"),
+        ("我知道啦", True, "[300,1900][1100,2100]"),
+    ))
+    assert reward.type is PageType.FOREST_CO_PLANT
+    assert "reward_ack" in reward.elements

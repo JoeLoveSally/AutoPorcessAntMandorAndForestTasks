@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import time
 
-from ..domain.models import PageType, TaskResult, TaskStatus
+from ..domain.models import DetectedPage, PageType, TaskResult, TaskStatus
 from ..runtime.errors import AutomationError, TimeoutError
 
 
 class LotteryRunner:
-    """Runs only explicitly allow-listed browse tasks, then consumes every draw."""
+    """Completes allow-listed tasks and performs the wheel's daily draw."""
 
     def __init__(self, workflow):
         self.workflow = workflow
@@ -15,21 +15,30 @@ class LotteryRunner:
     def run(
         self, result, page, task_key: str, name: str, max_tasks: int,
         *, exchange_feed: bool = False,
-    ) -> None:
+    ) -> DetectedPage:
         completed = 0
         current = page
         claim_key = f"claim_{task_key}"
 
-        if exchange_feed and "exchange_feed" in current.elements:
-            current = self._tap_and_settle(
-                result, current, "exchange_feed", f"{name}_exchange_feed",
-                required="confirm_exchange",
+        if exchange_feed:
+            current = self._locate(
+                current, ("exchange_feed", "exchange_feed_done"),
+                f"{name}_find_exchange_feed",
             )
-            current = self._tap_and_settle(
-                result, current, "confirm_exchange", f"{name}_confirm_exchange",
-                forbidden="confirm_exchange",
-            )
+            if "exchange_feed" in current.elements:
+                current = self._tap_and_settle(
+                    result, current, "exchange_feed", f"{name}_exchange_feed",
+                    required="confirm_exchange",
+                )
+                current = self._tap_and_settle(
+                    result, current, "confirm_exchange", f"{name}_confirm_exchange",
+                    forbidden="confirm_exchange",
+                )
 
+        current = self._locate(
+            current, ("claim_daily_chance", "daily_chance_done"),
+            f"{name}_find_daily_claim", required=False,
+        )
         if "claim_daily_chance" in current.elements:
             current = self._tap_and_settle(
                 result, current, "claim_daily_chance", f"{name}_claim_daily",
@@ -42,7 +51,23 @@ class LotteryRunner:
                 forbidden=claim_key,
             )
 
-        while task_key in current.elements and completed < max_tasks:
+        done_key = f"{task_key}_done"
+        task_enabled = not task_key.startswith("missing_")
+        if task_enabled:
+            current = self._locate(
+                current, (task_key, claim_key, done_key),
+                f"{name}_find_task", required=False,
+            )
+            if claim_key in current.elements:
+                current = self._tap_and_settle(
+                    result, current, claim_key, f"{name}_claim_pending_task",
+                    forbidden=claim_key,
+                )
+                current = self._locate(
+                    current, (task_key, done_key),
+                    f"{name}_find_task_after_claim", required=False,
+                )
+        while task_enabled and task_key in current.elements and completed < max_tasks:
             action = self.workflow.actions.tap(
                 current, task_key, f"{name}_task_{completed + 1}"
             )
@@ -59,10 +84,17 @@ class LotteryRunner:
                 forbidden=claim_key,
             )
             completed += 1
+            current = self._locate(
+                current, (task_key, claim_key, done_key),
+                f"{name}_find_next_task", required=False,
+            )
 
         if task_key in current.elements:
             raise AutomationError(f"{name} task limit reached before completion")
 
+        current = self._locate(
+            current, ("draw", "draws_done"), f"{name}_find_draw",
+        )
         draws = 0
         if "draw" in current.elements:
             action = self.workflow.actions.tap(current, "draw", f"{name}_draw_{draws + 1}")
@@ -86,6 +118,36 @@ class LotteryRunner:
         result.tasks.append(
             TaskResult(name, TaskStatus.SUCCESS, f"completed {completed} task(s), drew {draws} time(s)")
         )
+        return current
+
+    def _locate(
+        self, current: DetectedPage, keys: tuple[str, ...], name: str,
+        *, required: bool = True,
+    ) -> DetectedPage:
+        if any(key in current.elements for key in keys):
+            return current
+        width, height = self.workflow.device.screen_size()
+        directions = (
+            ((width // 2, int(height * 0.76)), (width // 2, int(height * 0.34))),
+            ((width // 2, int(height * 0.34)), (width // 2, int(height * 0.76))),
+        )
+        for direction_index, (start, end) in enumerate(directions):
+            for scan in range(6):
+                self.workflow.device.swipe(start, end, 450)
+                self.workflow._log(
+                    "lottery.scroll_for_element", name=name,
+                    direction=direction_index + 1, scan=scan + 1, keys=list(keys),
+                )
+                current = self.workflow._capture_page(name)
+                if current.type is not PageType.LOTTERY:
+                    raise AutomationError(
+                        f"Unexpected page while locating lottery action: {current.type.value}"
+                    )
+                if any(key in current.elements for key in keys):
+                    return current
+        if required:
+            raise AutomationError(f"Lottery action was not found: {', '.join(keys)}")
+        return current
 
     def _tap_and_settle(
         self, result, page, key: str, action_name: str,

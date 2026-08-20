@@ -342,7 +342,7 @@ class ManorDailyWorkflow:
                 result, current, key, f"open_manor_lottery_{len(processed) + 1}",
                 PageType.LOTTERY, f"manor_lottery_{len(processed) + 1}",
             )
-            runner.run(
+            lottery = runner.run(
                 result, lottery, "task_store",
                 f"manor_lottery_{len(processed) + 1}", 3,
                 exchange_feed=True,

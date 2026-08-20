@@ -21,7 +21,9 @@ class RuntimeConfig:
     poll_interval_seconds: float = 0.5
     external_task_timeout_seconds: float = 40.0
     external_swipe_interval_seconds: float = 3.0
-    energy_rain_seconds: float = 24.0
+    energy_rain_seconds: float = 20.0
+    energy_rain_min_seconds: float = 12.0
+    energy_rain_idle_seconds: float = 1.5
 
 
 @dataclass(frozen=True)
@@ -71,7 +73,9 @@ def load_config(path: Path) -> Config:
             poll_interval_seconds=float(runtime.get("poll_interval_seconds", 0.5)),
             external_task_timeout_seconds=float(runtime.get("external_task_timeout_seconds", 40.0)),
             external_swipe_interval_seconds=float(runtime.get("external_swipe_interval_seconds", 3.0)),
-            energy_rain_seconds=float(runtime.get("energy_rain_seconds", 24.0)),
+            energy_rain_seconds=float(runtime.get("energy_rain_seconds", 20.0)),
+            energy_rain_min_seconds=float(runtime.get("energy_rain_min_seconds", 12.0)),
+            energy_rain_idle_seconds=float(runtime.get("energy_rain_idle_seconds", 1.5)),
         ),
         quiz=QuizConfig(
             search_url=str(quiz.get("search_url", "https://api.bochaai.com/v1/web-search")),

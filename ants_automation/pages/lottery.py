@@ -182,11 +182,49 @@ def detect_lottery(observation: Observation) -> DetectedPage | None:
         elements["exchange_feed"] = _from_node(
             observation, "exchange_feed", exchange
         )
+    else:
+        exchange_task = next(
+            (node for node in tree.nodes
+             if "消耗饲料换机会" in (node.text or node.content_description)
+             and node.bounds.valid),
+            None,
+        )
+        exchange_done = exchange_task is not None and any(
+            (node.text or node.content_description).strip() == "已完成"
+            and node.bounds.valid
+            and abs(node.bounds.center[1] - exchange_task.bounds.center[1]) <= 180
+            for node in tree.nodes
+        )
+        if exchange_done:
+            elements["exchange_feed_done"] = UIElement(
+                "exchange_feed_done", exchange_task.text or exchange_task.content_description,
+                exchange_task.bounds, False, True, "ui_tree_lottery_state",
+                observation.timestamp,
+            )
     daily_claim = _find_action(observation, "每日签到", ("领取",))
     if daily_claim:
         elements["claim_daily_chance"] = _from_node(
             observation, "claim_daily_chance", daily_claim
         )
+    else:
+        daily_task = next(
+            (node for node in tree.nodes
+             if "每日签到" in (node.text or node.content_description)
+             and node.bounds.valid),
+            None,
+        )
+        daily_done = daily_task is not None and any(
+            (node.text or node.content_description).strip() == "已完成"
+            and node.bounds.valid
+            and abs(node.bounds.center[1] - daily_task.bounds.center[1]) <= 180
+            for node in tree.nodes
+        )
+        if daily_done:
+            elements["daily_chance_done"] = UIElement(
+                "daily_chance_done", daily_task.text or daily_task.content_description,
+                daily_task.bounds, False, True, "ui_tree_lottery_state",
+                observation.timestamp,
+            )
     for key, claim_key, fragment in (
         ("task_store", "claim_task_store", "去杂货铺逛一逛"),
         ("task_market", "claim_task_market", "去森林集市逛一逛"),
@@ -197,6 +235,21 @@ def detect_lottery(observation: Observation) -> DetectedPage | None:
         claim = _find_action(observation, fragment, ("领取",))
         if claim:
             elements[claim_key] = _from_node(observation, claim_key, claim)
+        task_text = next(
+            (node.text or node.content_description for node in tree.nodes
+             if fragment in (node.text or node.content_description)),
+            "",
+        )
+        progress = re.search(r"[（(]\s*(\d+)\s*/\s*(\d+)\s*[）)]", task_text)
+        if progress is not None and progress.group(1) == progress.group(2):
+            marker = next(
+                node for node in tree.nodes
+                if fragment in (node.text or node.content_description)
+            )
+            elements[f"{key}_done"] = UIElement(
+                f"{key}_done", task_text, marker.bounds, False, True,
+                "ui_tree_lottery_state", observation.timestamp,
+            )
     return DetectedPage(
         PageType.LOTTERY,
         observation,

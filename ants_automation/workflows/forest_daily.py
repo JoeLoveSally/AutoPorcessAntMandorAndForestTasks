@@ -97,8 +97,7 @@ class ForestDailyWorkflow:
         current = first
         for index in range(2):
             task_key = "task_market" if "task_market" in current.elements else "missing_market"
-            runner.run(result, current, task_key, f"forest_lottery_{index + 1}", 2)
-            current = self._capture_page(f"forest_lottery_{index + 1}_settled")
+            current = runner.run(result, current, task_key, f"forest_lottery_{index + 1}", 2)
             if index == 0:
                 if "next_wheel" in current.elements:
                     current = self._tap_and_wait(
@@ -131,11 +130,10 @@ class ForestDailyWorkflow:
         if "energy_rain" not in forest.elements:
             result.tasks.append(TaskResult("energy_rain", TaskStatus.SKIPPED, "entry not visible"))
             return forest
-        action = self.actions.tap(forest, "energy_rain", "open_energy_rain")
-        self._record_action(result, action)
-        rain = self._capture_page("energy_rain")
-        if rain.type is not PageType.FOREST_RAIN or "start" not in rain.elements:
-            raise AutomationError("Energy rain start page or start button was not recognized")
+        rain = self._tap_and_wait(
+            result, forest, "energy_rain", "open_energy_rain",
+            PageType.FOREST_RAIN, "energy_rain", required_elements=("start",),
+        )
         start = self.actions.tap(rain, "start", "start_energy_rain_1")
         self._record_action(result, start)
         if start.status.value != "executed":
@@ -148,18 +146,18 @@ class ForestDailyWorkflow:
             self._record_action(result, gift)
             if gift.status.value != "executed":
                 raise AutomationError(gift.error or "Unable to gift energy rain to 小布")
+            next_page = self._wait_for_rain_after_gift(
+                result, "energy_rain_after_gift"
+            )
         elif "more_friends" in result_page.elements:
             picker = self._tap_and_wait(
                 result, result_page, "more_friends", "open_more_energy_rain_friends",
                 PageType.FOREST_FRIEND_PICKER, "energy_rain_friend_picker",
             )
-            self._choose_xiaobu(result, picker)
+            next_page = self._choose_xiaobu(result, picker)
         else:
             raise AutomationError("Energy rain result has no 小布 or more-friends action")
         if "friend_xiaobu" in result_page.elements or "more_friends" in result_page.elements:
-            next_page = self._capture_page("energy_rain_after_gift")
-            if next_page.type is not PageType.FOREST_RAIN or "start" not in next_page.elements:
-                raise AutomationError(f"Second energy rain did not open: {next_page.type.value}")
             again = self.actions.tap(next_page, "start", "start_energy_rain_2")
             self._record_action(result, again)
             if again.status.value != "executed":
@@ -185,19 +183,41 @@ class ForestDailyWorkflow:
                 action = self.actions.tap(current, "friend_xiaobu", "select_xiaobu")
                 self._record_action(result, action)
                 after = self._capture_page("xiaobu_selected")
-                if after.type is PageType.FOREST_FRIEND_PICKER and "confirm_gift" in after.elements:
-                    confirm = self.actions.tap(after, "confirm_gift", "confirm_gift_xiaobu")
-                    self._record_action(result, confirm)
-                return after
+                return self._wait_for_rain_after_gift(
+                    result, "energy_rain_after_xiaobu", initial=after,
+                )
             width, height = self.device.screen_size()
             self.device.swipe((width // 2, int(height * 0.78)), (width // 2, int(height * 0.35)), 450)
             current = self._capture_page(f"find_xiaobu_{index + 1}")
         raise AutomationError("Friend 小布 was not found after opening more friends")
 
+    def _wait_for_rain_after_gift(
+        self, result: RunResult, name: str, initial: DetectedPage | None = None,
+    ) -> DetectedPage:
+        deadline = time.monotonic() + self.config.runtime.page_timeout_seconds
+        current = initial
+        while time.monotonic() < deadline:
+            if current is None:
+                current = self._capture_page(name)
+            if current.type is PageType.FOREST_RAIN and "start" in current.elements:
+                return current
+            if (current.type is PageType.FOREST_FRIEND_PICKER
+                    and "confirm_gift" in current.elements):
+                confirm = self.actions.tap(current, "confirm_gift", "confirm_gift_xiaobu")
+                self._record_action(result, confirm)
+                if confirm.status.value != "executed":
+                    raise AutomationError(confirm.error or "Unable to confirm gift to 小布")
+            current = None
+            time.sleep(self.config.runtime.poll_interval_seconds)
+        raise TimeoutError("Timed out waiting for second energy rain after gifting 小布")
+
     def _play_energy_rain(self, round_number: int) -> int:
         if self.run_directory is None:
             raise RuntimeError("workflow has not started")
-        deadline = time.monotonic() + self.config.runtime.energy_rain_seconds
+        started = time.monotonic()
+        deadline = started + self.config.runtime.energy_rain_seconds
+        last_ball_at = started
+        saw_ball = False
         taps = 0
         frames = 0
         while time.monotonic() < deadline:
@@ -206,6 +226,21 @@ class ForestDailyWorkflow:
             if points:
                 self.device.tap_many(points)
                 taps += len(points)
+            # The result screen contains one green number that passes the ball
+            # contour filter. Actual play keeps several balls on screen.
+            if len(points) >= 2:
+                last_ball_at = time.monotonic()
+                saw_ball = True
+            now = time.monotonic()
+            if (saw_ball
+                    and now - started >= self.config.runtime.energy_rain_min_seconds
+                    and now - last_ball_at >= self.config.runtime.energy_rain_idle_seconds):
+                self._log(
+                    "energy_rain.end_detected", round=round_number,
+                    elapsed_seconds=round(now - started, 2),
+                    idle_seconds=round(now - last_ball_at, 2),
+                )
+                break
         evidence = self.run_directory / f"energy-rain-{round_number}-final.png"
         self.device.screenshot(evidence)
         self._log("energy_rain.round_complete", round=round_number, frames=frames, taps=taps)
@@ -219,14 +254,51 @@ class ForestDailyWorkflow:
             result, forest, "co_plant", "open_co_plant", PageType.FOREST_CO_PLANT,
             "co_plant", required_elements=("water",),
         )
-        if "amount_100" in page.elements:
-            amount = self.actions.tap(page, "amount_100", "select_100g")
-            self._record_action(result, amount)
-            page = self._wait_for_page(PageType.FOREST_CO_PLANT, "co_plant_100g", required_elements=("water",))
-        water = self.actions.tap(page, "water", "water_love_co_plant")
+        open_amount = self.actions.tap(page, "water", "open_co_plant_amount")
+        self._record_action(result, open_amount)
+        page = self._wait_for_page(
+            PageType.FOREST_CO_PLANT, "co_plant_amount",
+            required_elements=("increase_amount", "confirm_water", "amount_value"),
+        )
+        for index in range(5):
+            value = page.elements["amount_value"].text or ""
+            if value == "100":
+                break
+            increase = self.actions.tap(page, "increase_amount", f"increase_co_plant_{index + 1}")
+            self._record_action(result, increase)
+            if increase.status.value != "executed":
+                raise AutomationError(increase.error or "Unable to increase co-plant amount")
+            page = self._wait_for_co_plant_amount(value)
+        if (page.elements["amount_value"].text or "") != "100":
+            raise AutomationError("Unable to set love co-plant amount to 100g")
+        water = self.actions.tap(page, "confirm_water", "water_love_co_plant_100g")
         self._record_action(result, water)
-        self._capture_page("co_plant_after_water")
+        if water.status.value != "executed":
+            raise AutomationError(water.error or "Unable to water love co-plant")
+        time.sleep(3.0)
+        after = self._capture_page("co_plant_after_water")
+        if after.type is not PageType.FOREST_CO_PLANT:
+            raise AutomationError(f"Unexpected page after co-plant watering: {after.type.value}")
+        if "reward_ack" in after.elements:
+            reward = self.actions.tap(after, "reward_ack", "acknowledge_co_plant_reward")
+            self._record_action(result, reward)
+            if reward.status.value != "executed":
+                raise AutomationError(reward.error or "Unable to acknowledge co-plant reward")
+        if "increase_amount" in after.elements:
+            raise AutomationError("Co-plant amount dialog remained open after watering")
         result.tasks.append(TaskResult("love_co_plant", TaskStatus.SUCCESS, "watered 100g"))
+
+    def _wait_for_co_plant_amount(self, previous: str) -> DetectedPage:
+        deadline = time.monotonic() + self.config.runtime.page_timeout_seconds
+        required = {"increase_amount", "confirm_water", "amount_value"}
+        while time.monotonic() < deadline:
+            page = self._capture_page("co_plant_amount_updated")
+            if (page.type is PageType.FOREST_CO_PLANT
+                    and required <= page.elements.keys()
+                    and (page.elements["amount_value"].text or "") != previous):
+                return page
+            time.sleep(self.config.runtime.poll_interval_seconds)
+        raise TimeoutError(f"Co-plant amount did not change from {previous}g")
 
     def _tap_and_wait(self, result, page, key, action_name, expected, name, required_elements=()):
         action = self.actions.tap(page, key, action_name)
