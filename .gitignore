@@ -1,0 +1,31 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Local tools
+/.agents/
+/.codex/
+
+# Secrets and local configuration
+.env
+.env.*
+config/*.toml
+!config/*.example.toml
+
+# Runtime output
+logs/*
+!logs/.gitkeep
+runtime/*
+!runtime/.gitkeep
+screenshots/runs/*
+!screenshots/runs/.gitkeep
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
