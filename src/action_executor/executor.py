@@ -1,0 +1,135 @@
+from __future__ import annotations
+
+import time
+from collections.abc import Callable
+
+from device_bridge.adb import AndroidDevice
+from domain_data import Action, ActionKind, ActionResult, ActionStatus, DetectedScreen, Page
+from logger import RunLogger
+from runtime.errors import SafetyStop
+from screen_perception import ObservationCollector, ObservationMode, ScreenDetector
+
+Postcondition = Callable[[DetectedScreen], bool]
+
+
+class ActionExecutor:
+    def __init__(
+        self,
+        device: AndroidDevice,
+        collector: ObservationCollector,
+        detector: ScreenDetector,
+        logger: RunLogger,
+        artifacts_directory,
+        package: str,
+        settle_seconds: float = 1.0,
+    ):
+        self.device = device
+        self.collector = collector
+        self.detector = detector
+        self.logger = logger
+        self.artifacts_directory = artifacts_directory
+        self.package = package
+        self.settle_seconds = settle_seconds
+
+    def execute(
+        self,
+        screen: DetectedScreen,
+        action: Action,
+        expected_pages: tuple[Page, ...] = (),
+        postcondition: Postcondition | None = None,
+        observe_after: bool = True,
+    ) -> tuple[ActionResult, DetectedScreen | None]:
+        started = time.perf_counter()
+        point: tuple[int, int] | None = None
+        try:
+            self._validate_screen(screen)
+            if action.kind is ActionKind.TAP:
+                if not action.element_key:
+                    raise SafetyStop("Tap action has no element key")
+                element = screen.element(action.element_key)
+                if element is None:
+                    raise SafetyStop(f"Element not found: {action.element_key}")
+                if element.observation_id != screen.observation.id:
+                    raise SafetyStop(f"Element is stale: {action.element_key}")
+                if not element.enabled or not element.clickable or not element.bounds.valid:
+                    raise SafetyStop(f"Element is not executable: {action.element_key}")
+                point = element.center
+                if not self.device.size().contains(point):
+                    raise SafetyStop(f"Element lies outside the current screen: {point}")
+                self.device.tap(point)
+            elif action.kind is ActionKind.SWIPE:
+                if action.start is None or action.end is None:
+                    raise SafetyStop("Swipe action is missing coordinates")
+                self.device.swipe(action.start, action.end, action.duration_ms)
+            elif action.kind is ActionKind.BACK:
+                self.device.back()
+            elif action.kind is ActionKind.WAIT:
+                pass
+            else:
+                raise SafetyStop(f"Unsupported action: {action.kind}")
+            after = None
+            if observe_after:
+                time.sleep(self.settle_seconds)
+                observation = self.collector.capture(
+                    self.artifacts_directory,
+                    f"after-{action.name}",
+                    ObservationMode.FULL,
+                )
+                after = self.detector.detect(observation)
+                if expected_pages and after.page not in expected_pages:
+                    raise SafetyStop(
+                        f"Postcondition page mismatch after {action.name}: "
+                        f"expected {[item.value for item in expected_pages]}, got {after.page.value}"
+                    )
+                if postcondition is not None and not postcondition(after):
+                    raise SafetyStop(f"Postcondition failed after {action.name}")
+            result = ActionResult(
+                action.name,
+                ActionStatus.EXECUTED,
+                screen.observation.id,
+                after.observation.id if after else None,
+                point,
+                elapsed_ms=(time.perf_counter() - started) * 1000,
+            )
+        except SafetyStop as exc:
+            after = None
+            result = ActionResult(
+                action.name,
+                ActionStatus.REJECTED,
+                screen.observation.id,
+                point=point,
+                error=str(exc),
+                elapsed_ms=(time.perf_counter() - started) * 1000,
+            )
+        except Exception as exc:
+            after = None
+            result = ActionResult(
+                action.name,
+                ActionStatus.FAILED,
+                screen.observation.id,
+                point=point,
+                error=str(exc),
+                elapsed_ms=(time.perf_counter() - started) * 1000,
+            )
+        self.logger.emit(
+            "action.completed",
+            name=result.name,
+            status=result.status.value,
+            before=result.before_observation_id,
+            after=result.after_observation_id,
+            point=result.point,
+            error=result.error,
+            elapsed_ms=round(result.elapsed_ms, 2),
+        )
+        return result, after
+
+    def _validate_screen(self, screen: DetectedScreen) -> None:
+        if screen.page is Page.UNKNOWN:
+            raise SafetyStop("Refusing action on unknown page")
+        if screen.observation.package != self.package:
+            raise SafetyStop(f"Foreground package is not Alipay: {screen.observation.package}")
+        if any(error.startswith("unstable_observation") for error in screen.observation.errors):
+            raise SafetyStop("Observation changed while it was captured")
+        package, _ = self.device.current_package_activity()
+        if package != self.package:
+            raise SafetyStop(f"Alipay is no longer foreground: {package}")

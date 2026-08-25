@@ -1,0 +1,42 @@
+package = "com.eg.android.AlipayGphone"
+
+[device]
+serial = ""
+adb_path = "adb"
+timeout_seconds = 20.0
+
+[runtime]
+logs_directory = "logs"
+screenshots_directory = "screenshots/runs"
+state_database = "runtime/task_state.db"
+cache_directory = "runtime/cache"
+launch_wait_seconds = 5.0
+page_timeout_seconds = 15.0
+poll_interval_seconds = 0.5
+settle_seconds = 1.0
+max_recovery_attempts = 2
+max_task_iterations = 50
+
+[perception]
+template_directory = "screenshots/template"
+template_threshold = 0.88
+template_ambiguity_margin = 0.04
+enable_ocr = false
+
+[quiz]
+search_url = "https://api.bochaai.com/v1/web-search"
+api_key_env = "WEB_SEARCH_API_KEY"
+env_file = ""
+fallback_option = 0
+cache_file = "runtime/cache/quiz_answers.json"
+
+[realtime]
+scrcpy_path = "runtime/tools/scrcpy-linux-x86_64-v4.1/scrcpy"
+server_path = "runtime/tools/scrcpy-linux-x86_64-v4.1/scrcpy-server"
+max_size = 1440
+bit_rate = 8000000
+max_fps = 60
+rain_duration_seconds = 22.0
+minimum_hit_rate = 0.80
+dedup_radius_pixels = 70
+track_ttl_seconds = 0.45

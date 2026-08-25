@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+scrcpy_version="4.1"
+scrcpy_sha256="ad56ae8bfeedf41e824945c11dbf55fcb092b3e615b9b486f48a50e30d389635"
+scrcpy_directory="${project_root}/runtime/tools/scrcpy-linux-x86_64-v${scrcpy_version}"
+archive="/tmp/scrcpy-linux-x86_64-v${scrcpy_version}.tar.gz"
+
+if [[ ! -x "${project_root}/.venv/bin/python" ]]; then
+    python3 -m venv "${project_root}/.venv"
+fi
+"${project_root}/.venv/bin/python" -m pip install -e "${project_root}[dev]"
+
+if [[ ! -x "${scrcpy_directory}/scrcpy" ]]; then
+    wget -O "${archive}" \
+        "https://github.com/Genymobile/scrcpy/releases/download/v${scrcpy_version}/scrcpy-linux-x86_64-v${scrcpy_version}.tar.gz"
+    printf '%s  %s\n' "${scrcpy_sha256}" "${archive}" | sha256sum --check --status
+    mkdir -p "${project_root}/runtime/tools"
+    tar -xzf "${archive}" -C "${project_root}/runtime/tools"
+fi
+
+if [[ -f "${scrcpy_directory}/adb" && ! -L "${scrcpy_directory}/adb" ]]; then
+    mv "${scrcpy_directory}/adb" "${scrcpy_directory}/adb.bundled"
+fi
+ln -sfn "${project_root}/scripts/adb-scrcpy-wrapper" "${scrcpy_directory}/adb"
+
+if [[ ! -f "${project_root}/config/config.toml" ]]; then
+    cp "${project_root}/config/config.example.toml" "${project_root}/config/config.toml"
+fi
+
+echo "Bootstrap complete. Edit config/config.toml, then run: ./scripts/ants-auto doctor"

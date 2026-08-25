@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="${project_root}/src:${project_root}/runtime/tools/python-root/usr/lib/python3/dist-packages${PYTHONPATH:+:${PYTHONPATH}}"
+cd "${project_root}"
+exec "${project_root}/.venv/bin/python" -m pytest "$@"

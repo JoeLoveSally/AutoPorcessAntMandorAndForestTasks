@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+system_adb="/usr/bin/adb"
+
+# On this WSL USB/IP setup `adb push` transfers the file immediately but may
+# keep the client process alive indefinitely.  scrcpy has a shorter internal
+# timeout and aborts.  Let the transfer finish, then close only that client;
+# the shared ADB daemon and device connection remain running.
+if [[ " $* " == *" push "* ]]; then
+    "${system_adb}" "$@" &
+    push_pid=$!
+    sleep 2
+    if kill -0 "${push_pid}" 2>/dev/null; then
+        kill "${push_pid}" 2>/dev/null || true
+        wait "${push_pid}" 2>/dev/null || true
+        exit 0
+    fi
+    wait "${push_pid}"
+    exit $?
+fi
+
+exec "${system_adb}" "$@"
