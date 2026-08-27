@@ -50,7 +50,7 @@ class ActionExecutor:
         started = time.perf_counter()
         point: tuple[int, int] | None = None
         try:
-            self._validate_screen(screen)
+            self._validate_screen(screen, action)
             if action.kind is ActionKind.TAP:
                 if not action.element_key:
                     raise SafetyStop("Tap action has no element key")
@@ -142,8 +142,10 @@ class ActionExecutor:
         )
         return result, after
 
-    def _validate_screen(self, screen: DetectedScreen) -> None:
-        if screen.page is Page.UNKNOWN:
+    def _validate_screen(self, screen: DetectedScreen, action: Action) -> None:
+        if screen.page is Page.UNKNOWN and action.kind is not ActionKind.BACK:
+            # Unknown pages refuse coordinate actions; Back is the one safe
+            # universal exit and stays allowed so recovery can leave ads.
             raise SafetyStop("Refusing action on unknown page")
         if screen.observation.package != self.package:
             raise SafetyStop(f"Foreground package is not Alipay: {screen.observation.package}")

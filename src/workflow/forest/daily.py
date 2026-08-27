@@ -171,7 +171,9 @@ class ForestWorkflow:
             page = self.session.tap(page, "water", "forest-love-plant-amount", (Page.FOREST_LOVE_PLANT,))
             for index in range(8):
                 page = self.session.tap(page, "plus", f"forest-love-plant-plus-{index + 1}", (Page.FOREST_LOVE_PLANT,))
-            page = self.session.tap(page, "confirm", "forest-love-plant-confirm", (Page.FOREST_LOVE_PLANT,))
+            page = self.session.tap(
+                page, "confirm", "forest-love-plant-confirm", (Page.FOREST_LOVE_PLANT,), irreversible=True,
+            )
             if page.element("close_reward"):
                 page = self.session.tap(page, "close_reward", "forest-love-plant-finish-reward", (Page.FOREST_LOVE_PLANT,))
             forest = self.session.back(page, "forest-love-plant-leave", (Page.FOREST_HOME,))
@@ -182,7 +184,9 @@ class ForestWorkflow:
         if forest.element("co_plant"):
             page = self.session.tap(forest, "co_plant", "forest-co-plant-open", (Page.FOREST_CO_PLANT,))
             page = self.session.tap(page, "water", "forest-co-plant-amount", (Page.FOREST_CO_PLANT,))
-            page = self.session.tap(page, "confirm", "forest-co-plant-confirm", (Page.FOREST_CO_PLANT,))
+            page = self.session.tap(
+                page, "confirm", "forest-co-plant-confirm", (Page.FOREST_CO_PLANT,), irreversible=True,
+            )
             forest = self.session.back(page, "forest-co-plant-leave", (Page.FOREST_HOME,))
             self.session.add_step("forest.water_co_plant", StepStatus.SUCCESS, "520g")
         else:

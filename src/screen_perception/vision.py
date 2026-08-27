@@ -230,22 +230,23 @@ def detect_modal_scrim(content: bytes) -> tuple[int, int, float] | None:
         and 30 <= box_height <= 200
         and area >= 600
     ]
-    if not candidates:
-        return None
     # The X sits below every other central element (pagination dots, notice
-    # text), so take the southernmost candidate.
-    (x, y), (left, top, box_width, box_height, _area) = max(
-        candidates, key=lambda item: item[0][1]
-    )
-    surround = band[
-        max(0, top - 30) : top + box_height + 30,
-        max(0, left - 30) : left + box_width + 30,
-    ]
-    if float(np.mean(surround)) >= 95:
-        return None
-    absolute_x = int(width * 0.44) + round(x)
-    absolute_y = int(height * 0.70) + round(y)
-    return absolute_x, absolute_y, 0.90
+    # text), so prefer the southernmost candidate. Each candidate is judged on
+    # its own surroundings at two radii: a thin X stroke needs the tight box,
+    # while a ring sitting over brighter page content needs the wider one.
+    for (x, y), (left, top, box_width, box_height, _area) in sorted(
+        candidates, key=lambda item: item[0][1], reverse=True
+    ):
+        for dilation in (30, 16):
+            surround = band[
+                max(0, top - dilation) : top + box_height + dilation,
+                max(0, left - dilation) : left + box_width + dilation,
+            ]
+            if float(np.mean(surround)) < 95:
+                absolute_x = int(width * 0.44) + round(x)
+                absolute_y = int(height * 0.70) + round(y)
+                return absolute_x, absolute_y, 0.90
+    return None
 
 
 def detect_love_plant_controls(

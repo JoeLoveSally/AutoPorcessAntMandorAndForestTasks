@@ -27,6 +27,9 @@ class _Device:
     def tap(self, point):
         self.taps.append(point)
 
+    def back(self):
+        self.backs = getattr(self, "backs", []) + [True]
+
     def current_package_activity(self):
         return "com.eg.android.AlipayGphone", "Activity"
 
@@ -136,3 +139,19 @@ def test_tap_without_overlay_is_unaffected():
     assert result.status is ActionStatus.EXECUTED
     assert observed is after
     assert executor.device.taps == [(720, 2600)]
+
+
+def test_back_is_allowed_on_unknown_pages():
+    observation = make_observation("<?xml version='1.0'?><hierarchy rotation='0' />")
+    unknown = DetectedScreen(Page.UNKNOWN, observation, evidence=("no_page_rule_matched",))
+    after = DetectedScreen(
+        Page.FOREST_HOME,
+        make_observation("<?xml version='1.0'?><hierarchy rotation='0' />"),
+        evidence=("ui:蚂蚁森林",),
+    )
+    executor = _executor(unknown, after)
+
+    result, observed = executor.execute(unknown, Action("recovery-back", ActionKind.BACK))
+
+    assert result.status is ActionStatus.EXECUTED
+    assert observed is after

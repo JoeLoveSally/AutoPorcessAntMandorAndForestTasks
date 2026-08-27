@@ -28,8 +28,13 @@ def _observation():
     return make_observation("<?xml version='1.0'?><hierarchy rotation='0' />")
 
 
-def _screen(page: Page, overlays: tuple[Overlay, ...] = ()) -> DetectedScreen:
-    return DetectedScreen(page, _observation(), {}, overlays, ("test",), 0.9)
+def _screen(
+    page: Page,
+    overlays: tuple[Overlay, ...] = (),
+    elements: tuple[str, ...] = (),
+) -> DetectedScreen:
+    bound = {key: Element(key, Bounds(0, 0, 10, 10), "obs-1") for key in elements}
+    return DetectedScreen(page, _observation(), bound, overlays, ("test",), 0.9)
 
 
 def _overlay(otype: OverlayType, *keys: str) -> Overlay:
@@ -234,12 +239,94 @@ def test_tap_does_not_retry_when_point_already_sent():
     session = _session_for_tap(initial, actions, recovery)
 
     with pytest.raises(AutomationError):
-        session.tap(initial, "confirm_donation", "donate", expected=(Page.MANOR_DONATION_SUCCESS,))
+        session.tap(
+            initial,
+            "confirm_donation",
+            "donate",
+            expected=(Page.MANOR_DONATION_SUCCESS,),
+            irreversible=True,
+        )
 
     # A point was already sent to the device — retrying could donate a second
-    # egg, so recovery must never fire.
+    # egg, so an irreversible action must never retry (design §6).
     assert not recovery.called
     assert actions.calls == ["donate"]
+
+
+def test_sent_tap_accepts_late_arriving_expected_page():
+    initial = _screen(Page.MANOR_HOME)
+    arrived = _screen(Page.MANOR_DIARY)
+    session = _session_for_tap(
+        initial,
+        FakeActions([_result(ActionStatus.REJECTED, point=(10, 10))]),
+        FakeRecovery(initial),
+    )
+    session.observe = lambda reason: arrived
+
+    out = session.tap(initial, "diary", "open-diary", expected=(Page.MANOR_DIARY,))
+
+    assert out is arrived
+    assert session.current is arrived
+
+
+def test_sent_tap_retries_when_source_page_is_unchanged():
+    initial = _screen(Page.MANOR_HOME)
+    unchanged = _screen(Page.MANOR_HOME, elements=("diary",))
+    target = _screen(Page.MANOR_DIARY)
+    actions = FakeActions([
+        _result(ActionStatus.REJECTED, point=(10, 10)),
+        _result(ActionStatus.EXECUTED, point=(10, 10), after=target),
+    ])
+    session = _session_for_tap(
+        initial, actions, FakeRecovery(initial)
+    )
+    session.observe = lambda reason: unchanged
+
+    out = session.tap(initial, "diary", "open-diary", expected=(Page.MANOR_DIARY,))
+
+    assert out is target
+    # Swallowed by a scrim: the source page and element are untouched, so the
+    # retry fires without a Back.
+    assert actions.calls == ["open-diary", "open-diary"]
+
+
+def test_sent_tap_backs_out_of_wrong_page_then_retries():
+    initial = _screen(Page.ALIPAY_HOME, elements=("forest",))
+    wrong = _screen(Page.MANOR_HOME)
+    restored = _screen(Page.ALIPAY_HOME, elements=("forest",))
+    target = _screen(Page.FOREST_HOME)
+    actions = FakeActions([
+        _result(ActionStatus.REJECTED, point=(10, 10)),
+        _result(ActionStatus.EXECUTED, point=None, after=restored),  # back-out
+        _result(ActionStatus.EXECUTED, point=(10, 10), after=target),  # retry
+    ])
+    session = _session_for_tap(initial, actions, FakeRecovery(initial))
+
+    def observe(reason):
+        return wrong if reason.endswith("sent-check") else restored
+
+    session.observe = observe
+
+    out = session.tap(initial, "forest", "forest-open", expected=(Page.FOREST_HOME,))
+
+    assert out is target
+    assert actions.calls == ["forest-open", "forest-open-back-out", "forest-open"]
+
+
+def test_sent_tap_raises_when_back_does_not_restore_source():
+    initial = _screen(Page.ALIPAY_HOME, elements=("forest",))
+    wrong = _screen(Page.MANOR_HOME)
+    actions = FakeActions([
+        _result(ActionStatus.REJECTED, point=(10, 10)),
+        _result(ActionStatus.EXECUTED, point=None, after=wrong),  # back-out stuck
+    ])
+    session = _session_for_tap(initial, actions, FakeRecovery(initial))
+    session.observe = lambda reason: wrong
+
+    with pytest.raises(AutomationError):
+        session.tap(initial, "forest", "forest-open", expected=(Page.FOREST_HOME,))
+
+    assert actions.calls == ["forest-open", "forest-open-back-out"]
 
 
 def test_tap_does_not_recover_without_expected_pages():
@@ -346,3 +433,52 @@ def test_wait_for_propagates_recovery_budget_exhaustion():
 
     with pytest.raises(AutomationError, match="Recovery budget exhausted"):
         session.wait_for(Page.MANOR_HOME, "wait")
+
+
+def test_wait_for_requires_two_agreeing_observations():
+    unknown = _screen(Page.UNKNOWN)
+    home_first = _screen(Page.MANOR_HOME)
+    home_second = _screen(Page.MANOR_HOME)
+    sequence = [unknown, home_first, home_second]
+    recovery = FakeRecovery(home_second)
+
+    def observe(reason):
+        return sequence.pop(0)
+
+    session = _session_for_wait(observe, recovery)
+    session.config.runtime.page_timeout_seconds = 2.0
+
+    out = session.wait_for(Page.MANOR_HOME, "wait")
+    assert out is home_second
+    assert not sequence
+
+
+def test_wait_for_keeps_polling_when_confirmation_disagrees():
+    home = _screen(Page.MANOR_HOME)
+    sequence = [home, _screen(Page.UNKNOWN), home, _screen(Page.MANOR_HOME)]
+    recovery = FakeRecovery(home)
+
+    def observe(reason):
+        return sequence.pop(0)
+
+    session = _session_for_wait(observe, recovery)
+    session.config.runtime.page_timeout_seconds = 2.0
+
+    out = session.wait_for(Page.MANOR_HOME, "wait")
+    assert out.page is Page.MANOR_HOME
+    assert not sequence
+
+
+def test_recover_backs_out_of_unknown_pages():
+    feed = _screen(Page.MANOR_FEED_TASKS)
+    unknown = _screen(Page.UNKNOWN)
+    session = FakeSession(
+        observe_seq=[unknown, feed],
+        back_after=feed,
+    )
+    policy = RecoveryPolicy(session)
+
+    result = policy.recover(unknown, (Page.MANOR_FEED_TASKS,))
+
+    assert result.page is Page.MANOR_FEED_TASKS
+    assert session.backs == ["recovery-back-1"]

@@ -105,7 +105,11 @@ class ManorWorkflow:
         detail = self.session.tap(projects, "first_project", "donation-first-project", (Page.MANOR_DONATION_DETAIL,))
         confirm = self.session.tap(detail, "donate_now", "donation-open-confirm", (Page.MANOR_DONATION_CONFIRM,))
         success = self.session.tap(
-            confirm, "confirm_donation", "donation-confirm-one", (Page.MANOR_DONATION_SUCCESS,)
+            confirm,
+                "confirm_donation",
+                "donation-confirm-one",
+                (Page.MANOR_DONATION_SUCCESS,),
+                irreversible=True,
         )
         detail = self.session.back(success, "donation-leave-success", (Page.MANOR_DONATION_DETAIL,))
         projects = self.session.back(detail, "donation-leave-detail", (Page.MANOR_DONATION_PROJECTS,))
@@ -136,7 +140,9 @@ class ManorWorkflow:
         key = "confirm" if confirm.element("confirm") else None
         if key is None:
             raise AutomationError(f"{step_name} confirmation is missing")
-        after = self.session.tap(confirm, key, action_name, (Page.MANOR_FAMILY_TASKS,))
+        after = self.session.tap(
+            confirm, key, action_name, (Page.MANOR_FAMILY_TASKS,), irreversible=True,
+        )
         if not after.element(done_key):
             raise AutomationError(f"{step_name} returned without its completion marker")
         self.session.add_step(step_name, StepStatus.SUCCESS)
@@ -381,7 +387,7 @@ class ManorWorkflow:
         for index in range(2):
             if not kitchen.element("cook"):
                 raise AutomationError("Kitchen cook action disappeared before two meals")
-            kitchen = self.session.tap(kitchen, "cook", f"kitchen-cook-{index + 1}")
+            kitchen = self.session.tap(kitchen, "cook", f"kitchen-cook-{index + 1}", irreversible=True)
             if kitchen.element("close"):
                 kitchen = self.session.tap(
                     kitchen, "close", f"kitchen-close-book-{index + 1}", (Page.CHICKEN_KITCHEN,)

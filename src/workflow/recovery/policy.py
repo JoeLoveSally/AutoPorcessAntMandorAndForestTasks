@@ -54,11 +54,13 @@ class RecoveryPolicy:
                         pass
                     break
             else:
-                if current.page is not Page.UNKNOWN:
-                    try:
-                        current = self.session.back(current, f"recovery-back-{attempt}")
-                    except AutomationError:
-                        pass
+                # Unknown pages are activity ads in practice, and one Back is
+                # the safe universal exit; the next attempt re-observes and the
+                # budget still bounds the whole ladder.
+                try:
+                    current = self.session.back(current, f"recovery-back-{attempt}")
+                except AutomationError:
+                    pass
             if current.page in allowed_pages:
                 return current
             if reenter is not None:

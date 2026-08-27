@@ -103,7 +103,17 @@ class WorkflowSession:
         while time.monotonic() < deadline:
             latest = self.observe(reason)
             if latest.page in expected and all(latest.element(key) is not None for key in required):
-                return latest
+                # One passing observation can catch a transition or a popup
+                # mid-load; require the next observation to agree before any
+                # action is validated against this page.
+                time.sleep(self.config.runtime.poll_interval_seconds)
+                confirmed = self.observe(f"{reason}-confirm")
+                if confirmed.page is latest.page and all(
+                    confirmed.element(key) is not None for key in required
+                ):
+                    return confirmed
+                latest = confirmed
+                continue
             time.sleep(self.config.runtime.poll_interval_seconds)
         # Nothing was sent to the device while waiting, so a transient overlay
         # or slow page load may simply have masked the target. Try one recovery
@@ -149,6 +159,7 @@ class WorkflowSession:
         name: str,
         expected: tuple[Page, ...] = (),
         required_after: tuple[str, ...] = (),
+        irreversible: bool = False,
     ) -> DetectedScreen:
         result, after = self._tap_raw(screen, key, name, expected, required_after)
         if result.status is ActionStatus.EXECUTED and after is not None:
@@ -157,9 +168,6 @@ class WorkflowSession:
         # know the target page. Recover the source page before looking up and
         # tapping the source element again; ``expected`` describes the page
         # after the tap and is therefore not a valid recovery target here.
-        # A point that is already set means the tap fired,
-        # so retrying could repeat an irreversible action such as donating an
-        # egg — that is never allowed (design §6).
         if (
             not self._recovering
             and expected
@@ -174,7 +182,60 @@ class WorkflowSession:
                 self._recovering = False
             if result.status is ActionStatus.EXECUTED and after is not None:
                 return after
-        raise AutomationError(result.error or f"Action failed: {name}")
+            raise AutomationError(result.error or f"Action failed: {name}")
+        if irreversible or not expected or result.point is None:
+            # A point that is already set means the tap reached the device, so
+            # retrying could repeat an irreversible action such as donating an
+            # egg — that is never allowed (design §6).
+            raise AutomationError(result.error or f"Action failed: {name}")
+        return self._retry_after_sent(screen, key, name, expected, required_after, result)
+
+    def _retry_after_sent(
+        self,
+        screen: DetectedScreen,
+        key: str,
+        name: str,
+        expected: tuple[Page, ...],
+        required_after: tuple[str, ...],
+        result: ActionResult,
+    ) -> DetectedScreen:
+        """Recover a sent tap whose postcondition disagreed.
+
+        A sent tap can still be inert: a promo scrim swallows it, or a slow
+        page navigated somewhere unexpected (activity ads, the sibling app).
+        Re-observe once: accept an expected page, re-tap when the source page
+        and its element are unchanged (the tap demonstrably did not fire), or
+        back out once and re-tap only after the source page and element are
+        restored. A consumed irreversible control would no longer be on its
+        source page, so it can never be pressed twice.
+        """
+        self._recovering = True
+        try:
+            fresh = self.observe(f"{name}-sent-check")
+            if fresh.page in expected and all(
+                fresh.element(item) is not None for item in required_after
+            ):
+                self.current = fresh
+                return fresh
+            if not (fresh.page is screen.page and fresh.element(key) is not None):
+                try:
+                    _back_result, after_back = self.actions.execute(
+                        fresh, Action(f"{name}-back-out", ActionKind.BACK), ()
+                    )
+                    self.result.actions.append(_back_result)
+                except Exception:
+                    after_back = None
+                if after_back is None or not (
+                    after_back.page is screen.page and after_back.element(key) is not None
+                ):
+                    raise AutomationError(result.error or f"Action failed: {name}")
+                fresh = after_back
+            result, after = self._tap_raw(fresh, key, name, expected, required_after)
+            if result.status is ActionStatus.EXECUTED and after is not None:
+                return after
+            raise AutomationError(result.error or f"Action failed: {name}")
+        finally:
+            self._recovering = False
 
     def recover(
         self,
