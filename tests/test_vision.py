@@ -95,3 +95,18 @@ def test_love_plant_ignores_small_purple_decorations():
     image = np.full((3200, 1440, 3), (240, 200, 250), dtype=np.uint8)
     cv2.circle(image, (1085, 1862), 60, (205, 90, 180), -1)
     assert detect_love_plant_controls(encode(image)) is None
+
+
+def test_yellow_right_button_ignores_lawn_and_ground_strip():
+    # Real-device friend page (run 20260827-041543): the 一键收 button is a
+    # bright orange-yellow pill hugging the right edge, while a dull green
+    # lawn patch (hue 42) and the full-width sandy ground strip also fall in
+    # the old mask range and used to win.
+    image = np.full((3200, 1440, 3), (150, 200, 90), dtype=np.uint8)
+    cv2.rectangle(image, (900, 1460), (1440, 1700), (80, 175, 90), -1)   # dull lawn, right edge
+    cv2.rectangle(image, (0, 2300), (1440, 2560), (60, 160, 190), -1)    # full-width sand strip
+    cv2.rectangle(image, (1075, 1800), (1440, 1940), (30, 200, 250), -1)  # the button
+    point = detect_yellow_right_button(encode(image))
+    assert point is not None
+    assert abs(point[0] - 1257) <= 4
+    assert abs(point[1] - 1870) <= 4

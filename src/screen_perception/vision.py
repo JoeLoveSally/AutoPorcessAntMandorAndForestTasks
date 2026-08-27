@@ -82,12 +82,19 @@ def detect_yellow_right_button(content: bytes) -> tuple[int, int] | None:
     image = decode_png(content)
     height, width = image.shape[:2]
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, (15, 90, 130), (45, 255, 255))
+    # Bright orange-yellow: the friend-page 一键收 button reads hue 25 / value
+    # 242, while the lawn (hue 42, value 176) and the sandy ground strip stay
+    # out of this range.
+    mask = cv2.inRange(hsv, (15, 90, 180), (33, 255, 255))
     count, _, stats, _ = cv2.connectedComponentsWithStats(mask)
     candidates: list[tuple[int, tuple[int, int]]] = []
     for left, top, item_width, item_height, area in stats[1:count]:
-        center = (left + item_width // 2, top + item_height // 2)
+        center = (int(left + item_width // 2), int(top + item_height // 2))
         if left + item_width < width * 0.88:
+            continue
+        # The button hugs the right edge but starts in the right half; a blob
+        # spanning the full width is ground, not a button.
+        if left < width * 0.50:
             continue
         if not height * 0.45 < center[1] < height * 0.80:
             continue
