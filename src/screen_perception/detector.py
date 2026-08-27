@@ -10,6 +10,7 @@ from screen_perception.vision import (
     detect_family_task_controls,
     detect_green_energy_balls,
     detect_kitchen_donate_controls,
+    detect_love_plant_controls,
     detect_manor_home_controls,
     detect_modal_scrim,
     detect_yellow_right_button,
@@ -448,6 +449,26 @@ class ScreenDetector:
             return self._screen(Page.FOREST_LOVE_PLANT, observation, tree, overlays, {
                 "water": ("为爱攒能量", "攒能量"), "plus": ("+",), "confirm": ("攒能量",),
             })
+        # The love-plant page renders 为爱攒能量 as Canvas; only 真爱合种 and
+        # calendar fragments reach the tree. Do not bind water from tree text:
+        # fragments such as 累计一起攒能量 would win over the real button, so
+        # the purple-pill signature is the only source for it.
+        if _visible(tree, "真爱合种") and observation.screenshot:
+            if controls := detect_love_plant_controls(observation.screenshot):
+                elements = {
+                    key: _point_element(
+                        observation, key, (x, y), f"cv_layout:love_plant_{key}", confidence
+                    )
+                    for key, (x, y, confidence) in controls.items()
+                }
+                return DetectedScreen(
+                    Page.FOREST_LOVE_PLANT,
+                    observation,
+                    elements,
+                    overlays,
+                    ("ui:真爱合种", "cv:love_plant_water"),
+                    0.88,
+                )
         if _visible(tree, "浇水") and _visible(tree, "合种") and "真爱合种" not in joined:
             return self._screen(Page.FOREST_CO_PLANT, observation, tree, overlays, {
                 "water": ("浇水",), "confirm": ("浇水",),

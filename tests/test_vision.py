@@ -3,6 +3,7 @@ import numpy as np
 
 from screen_perception.vision import (
     detect_green_energy_balls,
+    detect_love_plant_controls,
     detect_modal_scrim,
     detect_yellow_right_button,
 )
@@ -76,3 +77,21 @@ def test_modal_scrim_ignores_central_blob_on_bright_surround():
     cv2.rectangle(image, (200, 860), (1240, 2150), (225, 235, 240), -1)
     cv2.circle(image, (720, 2734), 34, (250, 250, 250), 10)
     assert detect_modal_scrim(encode(image)) is None
+
+
+def test_love_plant_finds_centre_purple_pill():
+    image = np.full((3200, 1440, 3), (240, 200, 250), dtype=np.uint8)
+    cv2.ellipse(image, (720, 1599), (330, 92), 0, 0, 360, (205, 90, 180), -1)
+    cv2.rectangle(image, (60, 2180), (1380, 2250), (205, 90, 180), -1)
+    controls = detect_love_plant_controls(encode(image))
+    assert controls is not None
+    x, y, confidence = controls["water"]
+    assert abs(x - 720) <= 4
+    assert abs(y - 1599) <= 4
+    assert confidence == 0.88
+
+
+def test_love_plant_ignores_small_purple_decorations():
+    image = np.full((3200, 1440, 3), (240, 200, 250), dtype=np.uint8)
+    cv2.circle(image, (1085, 1862), 60, (205, 90, 180), -1)
+    assert detect_love_plant_controls(encode(image)) is None

@@ -293,3 +293,24 @@ def test_activity_banner_does_not_steal_the_forest_entry():
     assert forest.bounds == Bounds(343, 1564, 539, 1617)
     # The message-box sender label must not win over the app icon either.
     assert manor.center == (1275, 1326)
+
+
+def test_love_plant_canvas_page_binds_water_from_vision_not_tree_fragments():
+    # Real-device dump (run 20260827-041113): the 真爱合种 page exposes only
+    # Canvas text fragments such as 累计一起攒能量; the 为爱攒能量 pill is an
+    # image, and tree text must not steal the water binding.
+    shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
+      <node text='真爱合种' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[444,84][984,540]' />
+      <node text='累计一起攒能量' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[388,536][680,672]' />
+      <node text='蚂蚁森林' content-desc='' resource-id='' class='TextView' clickable='true' enabled='true' bounds='[152,203][432,293]' />
+    </hierarchy>"""
+    image = np.full((3200, 1440, 3), (240, 200, 250), dtype=np.uint8)
+    cv2.ellipse(image, (720, 1599), (330, 92), 0, 0, 360, (205, 90, 180), -1)
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+
+    page = ScreenDetector().detect(make_observation(shaped, screenshot=encoded.tobytes()))
+
+    assert page.page is Page.FOREST_LOVE_PLANT
+    assert page.element("water").center == (720, 1599)
+    assert page.element("water").source == "cv_layout:love_plant_water"

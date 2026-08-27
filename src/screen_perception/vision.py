@@ -241,6 +241,40 @@ def detect_modal_scrim(content: bytes) -> tuple[int, int, float] | None:
     return absolute_x, absolute_y, 0.90
 
 
+def detect_love_plant_controls(
+    content: bytes,
+) -> dict[str, tuple[int, int, float]] | None:
+    """Detect the Canvas 真爱合种 page's purple collect button.
+
+    The love-plant page renders 为爱攒能量 as one image, so only the title and
+    calendar fragments reach the accessibility tree.  The call to action is a
+    large purple pill on the horizontal centreline between the header and the
+    reward cards; anything smaller in the band is page decoration.
+    """
+    image = decode_png(content)
+    height, width = image.shape[:2]
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    purple = cv2.inRange(hsv, (125, 60, 120), (170, 255, 255))
+    band = purple[int(height * 0.40) : int(height * 0.60), int(width * 0.20) : int(width * 0.80)]
+    if not band.size:
+        return None
+    count, _, stats, centers = cv2.connectedComponentsWithStats(band)
+    candidates: list[tuple[int, tuple[int, int]]] = []
+    for (_left, _top, item_width, item_height, area), (x, y) in zip(
+        stats[1:count], centers[1:count], strict=True
+    ):
+        if (
+            area >= width * height * 0.005
+            and item_width >= width * 0.25
+            and height * 0.03 <= item_height <= height * 0.10
+        ):
+            candidates.append((int(area), (int(width * 0.20) + round(x), int(height * 0.40) + round(y))))
+    if not candidates:
+        return None
+    x, y = max(candidates)[1]
+    return {"water": (x, y, 0.88)}
+
+
 def detect_chicken_kitchen_controls(
     content: bytes,
 ) -> dict[str, tuple[int, int, float]] | None:
