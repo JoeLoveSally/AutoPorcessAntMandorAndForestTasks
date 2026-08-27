@@ -314,3 +314,18 @@ def test_love_plant_canvas_page_binds_water_from_vision_not_tree_fragments():
     assert page.page is Page.FOREST_LOVE_PLANT
     assert page.element("water").center == (720, 1599)
     assert page.element("water").source == "cv_layout:love_plant_water"
+
+
+def test_anniversary_campaign_is_not_the_forest_home_or_a_lottery():
+    # Real-device dump (run 20260827-052152): the full-screen 10th-anniversary
+    # campaign also contains 蚂蚁森林 and 活动剩余时间 in its tree; without the
+    # campaign guard it classified as the forest home and every carousel swipe
+    # ran on the wrong page.
+    shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
+      <node text='浇水给蚂蚁森林十年之约林' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[300,2900][1140,2980]' />
+      <node text='浇水加入' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[200,2570][1240,2760]' />
+      <node text='上滑种树得「10周年限定证书」' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[250,3080][1190,3160]' />
+      <node text='活动剩余时间 06天11时59分51秒' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[360,1440][1080,1500]' />
+    </hierarchy>"""
+    page = ScreenDetector().detect(make_observation(shaped))
+    assert page.page is Page.UNKNOWN

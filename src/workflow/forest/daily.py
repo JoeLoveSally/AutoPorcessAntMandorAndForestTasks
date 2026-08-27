@@ -20,10 +20,27 @@ class ForestWorkflow:
         time.sleep(max(2.0, self.session.config.runtime.settle_seconds))
         forest = self.session.wait_for(Page.FOREST_HOME, "forest-stable")
         forest = self._collect_own_energy(forest)
+        forest = self._settled(forest)
         forest = self._collect_friend_energy(forest)
         forest = self._water(forest)
         forest = self._energy_rain(forest)
         self.session.add_step("forest", StepStatus.SUCCESS, "single pass completed")
+        return forest
+
+    def _settled(self, forest: DetectedScreen) -> DetectedScreen:
+        """Re-observe a page whose tree collapsed to nothing.
+
+        Right after a collect animation the home classifies as forest_home
+        with no elements at all; every availability decision made on that
+        frame would skip the remaining tasks, and a carousel swipe on it can
+        land on the anniversary campaign page.
+        """
+        if forest.elements or forest.overlays:
+            return forest
+        time.sleep(max(1.0, self.session.config.runtime.settle_seconds))
+        settled = self.session.observe("forest-settle")
+        if len(settled.elements) >= len(forest.elements):
+            return settled
         return forest
 
     def _collect_own_energy(self, forest: DetectedScreen) -> DetectedScreen:
@@ -235,6 +252,9 @@ class ForestWorkflow:
         return forest
 
     def _locate_carousel(self, forest: DetectedScreen, key: str) -> DetectedScreen:
+        if forest.element(key):
+            return forest
+        forest = self._settled(forest)
         if forest.element(key):
             return forest
         size = self.session.device.size()

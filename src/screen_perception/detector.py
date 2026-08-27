@@ -354,7 +354,11 @@ class ScreenDetector:
             return self._quiz(observation, tree, overlays, result="正确答案" in joined)
         if _has(joined, "饲料任务", "领饲料"):
             return self._feed_tasks(observation, tree, overlays)
-        if _has(joined, "抽奖机会", "立即抽奖", "活动剩余时间"):
+        # The anniversary campaign shows 活动剩余时间 but is not a lottery;
+        # leave it unclassified so recovery backs out of it.
+        if _has(joined, "抽奖机会", "立即抽奖", "活动剩余时间") and not _visible(
+            tree, "上滑种树", "浇水加入", "十年之约"
+        ):
             return self._lottery(Page.LOTTERY, observation, tree, overlays)
         # Baba Farm (spec: 支付宝每日任务文字描述.txt line 67). The harvest
         # pack is a full-screen layer that masks the main-page markers, so it
@@ -485,7 +489,13 @@ class ScreenDetector:
                 if point := detect_yellow_right_button(observation.screenshot):
                     elements["one_click"] = _point_element(observation, "one_click", point, "cv:yellow_right")
             return DetectedScreen(Page.FOREST_FRIEND, observation, elements, overlays, ("friend_energy_marker",), 0.90)
-        if _visible(tree, "蚂蚁森林"):
+        # The 10th-anniversary campaign page is a full-screen Canvas whose tree
+        # also contains 蚂蚁森林 (浇水给蚂蚁森林十年之约林); without this guard
+        # it classifies as the forest home and every carousel swipe runs on the
+        # wrong page.
+        if _visible(tree, "蚂蚁森林") and not _visible(
+            tree, "上滑种树", "浇水加入", "十年之约"
+        ):
             elements = self._elements(observation, tree, {
                 "find_energy": ("找能量",), "energy_rain": ("天天能量雨", "能量雨"),
                 "love_plant": ("真爱合种",),
