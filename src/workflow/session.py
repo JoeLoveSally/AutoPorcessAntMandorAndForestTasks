@@ -154,7 +154,10 @@ class WorkflowSession:
         if result.status is ActionStatus.EXECUTED and after is not None:
             return after
         # Retry only when nothing was sent to the device (point is None) and we
-        # know the target page. A point that is already set means the tap fired,
+        # know the target page. Recover the source page before looking up and
+        # tapping the source element again; ``expected`` describes the page
+        # after the tap and is therefore not a valid recovery target here.
+        # A point that is already set means the tap fired,
         # so retrying could repeat an irreversible action such as donating an
         # egg — that is never allowed (design §6).
         if (
@@ -165,7 +168,7 @@ class WorkflowSession:
         ):
             self._recovering = True
             try:
-                recovered = self.recover(expected)
+                recovered = self.recover((screen.page,))
                 result, after = self._tap_raw(recovered, key, name, expected, required_after)
             finally:
                 self._recovering = False

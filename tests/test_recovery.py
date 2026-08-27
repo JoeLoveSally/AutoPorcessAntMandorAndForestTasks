@@ -193,7 +193,7 @@ def _result(status, *, point=None, after=None, error="missing"):
     return result, after
 
 
-def test_tap_retries_after_pre_tap_rejection_with_no_point_sent():
+def test_tap_recovers_source_page_before_retrying_destination_action():
     initial = _screen(Page.MANOR_HOME)
     recovered = _screen(Page.MANOR_HOME)
     target = _screen(Page.MANOR_DIARY)
@@ -207,7 +207,7 @@ def test_tap_retries_after_pre_tap_rejection_with_no_point_sent():
     out = session.tap(initial, "diary", "open-diary", expected=(Page.MANOR_DIARY,))
 
     assert out is target
-    assert recovery.called and recovery.allowed == (Page.MANOR_DIARY,)
+    assert recovery.called and recovery.allowed == (Page.MANOR_HOME,)
     assert actions.calls == ["open-diary", "open-diary"]
     assert session.current is target
 
