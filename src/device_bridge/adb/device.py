@@ -22,6 +22,7 @@ class AndroidDevice(Protocol):
     def tap(self, point: tuple[int, int]) -> None: ...
     def swipe(self, start: tuple[int, int], end: tuple[int, int], duration_ms: int = 400) -> None: ...
     def back(self) -> None: ...
+    def wake(self) -> None: ...
     def size(self) -> Size: ...
 
 
@@ -121,6 +122,35 @@ class AdbDevice:
 
     def back(self) -> None:
         self.shell("input", "keyevent", "KEYCODE_BACK")
+
+    def wake(self) -> None:
+        """Wake the screen and dismiss a non-secure keyguard.
+
+        Long idle periods between runs leave the phone asleep; without this
+        every observation classifies the AOD clock as an unknown page and the
+        recovery ladder burns its budget on Back presses that do nothing.
+        """
+        self.shell("input", "keyevent", "KEYCODE_WAKEUP")
+        time.sleep(0.8)
+        if not self._keyguard_showing():
+            return
+        width, height = self.size().width, self.size().height
+        self.shell(
+            "input", "swipe",
+            str(width // 2), str(int(height * 0.82)),
+            str(width // 2), str(int(height * 0.25)),
+            "300",
+        )
+        time.sleep(0.8)
+        if self._keyguard_showing():
+            raise DeviceError(
+                "The keyguard is still showing after waking the device; "
+                "unlock the phone once so the run can continue"
+            )
+
+    def _keyguard_showing(self) -> bool:
+        policy = self.shell("dumpsys", "window", "policy")
+        return bool(re.search(r"^\s+showing=true\s*$", policy, re.MULTILINE))
 
     def size(self) -> Size:
         if self._size is None:

@@ -23,6 +23,7 @@ def run_workflow(config: Config, target: str = "daily") -> RunResult:
     session = WorkflowSession(target, device, config)
     session.start()
     try:
+        device.wake()
         device.force_stop_package(config.package)
         device.launch_package(config.package)
         time.sleep(config.runtime.launch_wait_seconds)
