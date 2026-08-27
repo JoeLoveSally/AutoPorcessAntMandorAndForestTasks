@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING
 
 from domain_data import DetectedScreen, OverlayType, Page
 from runtime.errors import AutomationError
-from workflow.session import WorkflowSession
+
+if TYPE_CHECKING:
+    from workflow.session import WorkflowSession
 
 
 class RecoveryPolicy:
@@ -34,7 +37,16 @@ class RecoveryPolicy:
                     None,
                 )
                 if key and overlay.type is not OverlayType.UNKNOWN:
-                    current = self.session.tap(current, key, f"recovery-dismiss-{overlay.type.value}")
+                    # Dismiss via the non-recovering primitive so a failed
+                    # dismissal cannot recurse into another recovery attempt.
+                    try:
+                        _, after = self.session._tap_raw(
+                            current, key, f"recovery-dismiss-{overlay.type.value}"
+                        )
+                        if after is not None:
+                            current = after
+                    except AutomationError:
+                        pass
                     break
             else:
                 if current.page is not Page.UNKNOWN:

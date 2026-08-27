@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from action_executor import ActionExecutor
@@ -10,6 +11,7 @@ from device_bridge.adb import AndroidDevice
 from domain_data import (
     Action,
     ActionKind,
+    ActionResult,
     ActionStatus,
     DetectedScreen,
     Page,
@@ -22,6 +24,7 @@ from runtime.config import Config
 from runtime.errors import AutomationError, StepTimeout
 from runtime.state_store import StateStore
 from screen_perception import ObservationCollector, ObservationMode, ScreenDetector
+from workflow.recovery import RecoveryPolicy
 
 
 class WorkflowSession:
@@ -51,6 +54,8 @@ class WorkflowSession:
             datetime.now(timezone.utc),
         )
         self.current: DetectedScreen | None = None
+        self.recovery = RecoveryPolicy(self)
+        self._recovering = False
 
     def start(self) -> None:
         if not self.store.acquire_lock("daily", self.run_id):
@@ -100,8 +105,42 @@ class WorkflowSession:
             if latest.page in expected and all(latest.element(key) is not None for key in required):
                 return latest
             time.sleep(self.config.runtime.poll_interval_seconds)
-        detail = latest.page.value if latest else "none"
+        # Nothing was sent to the device while waiting, so a transient overlay
+        # or slow page load may simply have masked the target. Try one recovery
+        # pass before declaring the wait failed.
+        if expected and latest is not None:
+            recovered = self.recover(expected)
+            if all(recovered.element(key) is not None for key in required):
+                return recovered
+            detail = recovered.page.value
+        else:
+            detail = latest.page.value if latest else "none"
         raise StepTimeout(f"Timed out waiting for {[page.value for page in expected]}; latest={detail}")
+
+    def _tap_raw(
+        self,
+        screen: DetectedScreen,
+        key: str,
+        name: str,
+        expected: tuple[Page, ...] = (),
+        required_after: tuple[str, ...] = (),
+    ) -> tuple[ActionResult, DetectedScreen | None]:
+        """Execute a tap with no recovery; return the result and next screen.
+
+        ``tap`` wraps this with one recovery-and-retry pass. Recovery and
+        overlay dismissal call this directly so a failed dismiss can never
+        recurse into another recovery attempt.
+        """
+        result, after = self.actions.execute(
+            screen,
+            Action(name, ActionKind.TAP, key),
+            expected,
+            (lambda page: all(page.element(item) is not None for item in required_after)) if required_after else None,
+        )
+        self.result.actions.append(result)
+        if result.status is ActionStatus.EXECUTED and after is not None:
+            self.current = after
+        return result, after
 
     def tap(
         self,
@@ -111,17 +150,43 @@ class WorkflowSession:
         expected: tuple[Page, ...] = (),
         required_after: tuple[str, ...] = (),
     ) -> DetectedScreen:
-        result, after = self.actions.execute(
-            screen,
-            Action(name, ActionKind.TAP, key),
-            expected,
-            (lambda page: all(page.element(item) is not None for item in required_after)) if required_after else None,
-        )
-        self.result.actions.append(result)
-        if result.status is not ActionStatus.EXECUTED or after is None:
-            raise AutomationError(result.error or f"Action failed: {name}")
-        self.current = after
-        return after
+        result, after = self._tap_raw(screen, key, name, expected, required_after)
+        if result.status is ActionStatus.EXECUTED and after is not None:
+            return after
+        # Retry only when nothing was sent to the device (point is None) and we
+        # know the target page. A point that is already set means the tap fired,
+        # so retrying could repeat an irreversible action such as donating an
+        # egg — that is never allowed (design §6).
+        if (
+            not self._recovering
+            and expected
+            and result.status is ActionStatus.REJECTED
+            and result.point is None
+        ):
+            self._recovering = True
+            try:
+                recovered = self.recover(expected)
+                result, after = self._tap_raw(recovered, key, name, expected, required_after)
+            finally:
+                self._recovering = False
+            if result.status is ActionStatus.EXECUTED and after is not None:
+                return after
+        raise AutomationError(result.error or f"Action failed: {name}")
+
+    def recover(
+        self,
+        allowed_pages: tuple[Page, ...],
+        reenter: Callable[[], DetectedScreen] | None = None,
+    ) -> DetectedScreen:
+        """Re-observe, dismiss known overlays and back out to an allowed page.
+
+        ``reenter`` lets a task re-open its entry point (design §7 step 5);
+        leaving it ``None`` covers the common case of a transient overlay or
+        slow load sitting on top of the expected page.
+        """
+        if self.current is None:
+            raise AutomationError("Cannot recover without a prior observation")
+        return self.recovery.recover(self.current, allowed_pages, reenter)
 
     def back(self, screen: DetectedScreen, name: str, expected: tuple[Page, ...] = ()) -> DetectedScreen:
         result, after = self.actions.execute(screen, Action(name, ActionKind.BACK), expected)
