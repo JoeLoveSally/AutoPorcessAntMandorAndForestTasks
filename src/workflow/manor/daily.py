@@ -266,31 +266,111 @@ class ManorWorkflow:
         return tasks
 
     def _baba_farm(self, tasks):
-        farm = self.session.tap(tasks, "farm", "baba-farm-open", (Page.BABA_FARM,))
-        for index in range(12):
-            if farm.element("claim"):
-                farm = self.session.tap(farm, "claim", f"baba-farm-claim-{index + 1}")
-                continue
-            if farm.element("fertilize"):
-                farm = self.session.tap(farm, "fertilize", f"baba-farm-fertilize-{index + 1}")
-                continue
-            break
+        # Spec: 支付宝每日任务文字描述.txt line 67. Opening the farm auto-
+        # redirects to the 做任务集肥料 sub-page; collect its sub-tasks and close
+        # back to the farm main page, claim the daily free fertilizer, then run
+        # two fertilise → 立即领肥 → 丰收礼包 rounds before returning to the feed
+        # task list. Text markers are calibration points (see detector.py).
+        farm = self.session.tap(
+            tasks, "farm", "baba-farm-open", (Page.BABA_FARM, Page.BABA_FARM_TASKS)
+        )
+        if farm.page is Page.BABA_FARM_TASKS:
+            farm = self._baba_farm_tasks(farm)
+        if farm.element("free_fertilizer"):
+            farm = self.session.tap(
+                farm, "free_fertilizer", "baba-free-fertilizer", (Page.BABA_FARM,)
+            )
+            farm = self._dismiss_farm_popup(farm)
+        for index in range(2):
+            if not farm.element("fertilize"):
+                raise AutomationError("Baba Farm lost the fertilise action mid-flow")
+            farm = self.session.tap(
+                farm, "fertilize", f"baba-fertilize-{index + 1}", (Page.BABA_FARM,)
+            )
+            farm = self._dismiss_farm_popup(farm)
+            if farm.element("claim_now"):
+                farm = self.session.tap(
+                    farm, "claim_now", f"baba-claim-now-{index + 1}", (Page.BABA_FARM_HARVEST,)
+                )
+                farm = self._baba_harvest(farm)
         self.session.device.back()
         return self.session.wait_for(Page.MANOR_FEED_TASKS, "baba-farm-return")
 
+    def _baba_farm_tasks(self, farm):
+        if farm.element("daily_sign_claim"):
+            farm = self.session.tap(farm, "daily_sign_claim", "baba-tasks-daily-sign")
+        farm = self._locate_in_page(
+            farm, "chicken_feed_claim", Page.BABA_FARM_TASKS,
+            "baba-tasks-chicken-feed", required=False,
+        )
+        if farm.element("chicken_feed_claim"):
+            farm = self.session.tap(farm, "chicken_feed_claim", "baba-tasks-chicken-feed")
+        if farm.element("close"):
+            farm = self.session.tap(farm, "close", "baba-tasks-close", (Page.BABA_FARM,))
+        return farm
+
+    def _baba_harvest(self, farm):
+        if farm.element("claim"):
+            farm = self.session.tap(farm, "claim", "baba-harvest-claim", (Page.BABA_FARM_HARVEST,))
+        if farm.element("close"):
+            farm = self.session.tap(farm, "close", "baba-harvest-close", (Page.BABA_FARM,))
+        return farm
+
+    def _dismiss_farm_popup(self, farm):
+        # 去蚂蚁森林收能量 / 施肥挑战 popups sit over the farm after an action;
+        # close them so they don't block the next step. (Calibration point.)
+        if farm.page is Page.BABA_FARM and farm.element("close_reward"):
+            return self.session.tap(farm, "close_reward", "baba-dismiss-popup", (Page.BABA_FARM,))
+        return farm
+
+    def _locate_in_page(self, current, key, page, name, *, required=True):
+        if current.element(key):
+            return current
+        size = self.session.device.size()
+        for index in range(8):
+            current = self.session.swipe(
+                current,
+                f"{name}-locate-{index + 1}",
+                (size.width // 2, int(size.height * 0.78)),
+                (size.width // 2, int(size.height * 0.35)),
+                450,
+            )
+            if current.page is not page:
+                raise AutomationError(f"Left {page.value} while locating {key}")
+            if current.element(key):
+                return current
+        if required:
+            raise AutomationError(f"{key} was not found on {page.value}")
+        return current
+
     def _kitchen(self, tasks):
+        # Spec: line 77. Claim daily ingredients, open the 爱心食材店 sub-page to
+        # collect 领10g食材, then cook twice (each cook shows a 美食图鉴 closed via X).
         kitchen = self.session.tap(tasks, "kitchen", "kitchen-open", (Page.CHICKEN_KITCHEN,))
         for key in ("daily_ingredient", "claim_ingredient"):
             if kitchen.element(key):
                 kitchen = self.session.tap(kitchen, key, f"kitchen-{key}")
+        if kitchen.element("donate_shop"):
+            kitchen = self._kitchen_donate(kitchen)
         for index in range(2):
             if not kitchen.element("cook"):
                 raise AutomationError("Kitchen cook action disappeared before two meals")
             kitchen = self.session.tap(kitchen, "cook", f"kitchen-cook-{index + 1}")
             if kitchen.element("close"):
-                kitchen = self.session.tap(kitchen, "close", f"kitchen-close-book-{index + 1}", (Page.CHICKEN_KITCHEN,))
+                kitchen = self.session.tap(
+                    kitchen, "close", f"kitchen-close-book-{index + 1}", (Page.CHICKEN_KITCHEN,)
+                )
         self.session.device.back()
         return self.session.wait_for(Page.MANOR_FEED_TASKS, "kitchen-return")
+
+    def _kitchen_donate(self, kitchen):
+        donate = self.session.tap(
+            kitchen, "donate_shop", "kitchen-donate-open", (Page.KITCHEN_DONATE,)
+        )
+        if donate.element("claim"):
+            donate = self.session.tap(donate, "claim", "kitchen-donate-claim", (Page.KITCHEN_DONATE,))
+        self.session.device.back()
+        return self.session.wait_for(Page.CHICKEN_KITCHEN, "kitchen-donate-return")
 
     def _locate_feed(self, current: DetectedScreen, key: str, required: bool = True) -> DetectedScreen:
         if current.element(key):

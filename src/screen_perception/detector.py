@@ -268,14 +268,46 @@ class ScreenDetector:
             return self._feed_tasks(observation, tree, overlays)
         if _has(joined, "抽奖机会", "立即抽奖", "活动剩余时间"):
             return self._lottery(Page.LOTTERY, observation, tree, overlays)
-        if _has(joined, "芭芭农场", "施肥", "做任务集肥料"):
-            return self._screen(Page.BABA_FARM, observation, tree, overlays, {
-                "fertilize": ("施肥",), "claim": ("领取", "立即领取", "立即领肥"), "close": ("关闭",),
+        # Baba Farm (spec: 支付宝每日任务文字描述.txt line 67). The harvest
+        # pack is a full-screen layer that masks the main-page markers, so it
+        # is detected first; the 做任务集肥料 sub-page next; then the main page.
+        # All text fragments are calibration points verified against the spec
+        # and must be confirmed on a real UI dump.
+        if _has(joined, "丰收礼包"):
+            return self._screen(Page.BABA_FARM_HARVEST, observation, tree, overlays, {
+                "claim": ("立即领取",), "close": ("关闭", "知道了"),
             })
-        if _has(joined, "小鸡厨房", "做美食", "领今日食材"):
+        if _has(joined, "做任务集肥料"):
+            elements: dict[str, Element] = self._elements(observation, tree, {"close": ("关闭",)})
+            if action := tree.task_action(observation.id, "daily_sign_claim", ("每日签到",), ("领取",)):
+                elements["daily_sign_claim"] = action
+            if action := tree.task_action(
+                observation.id, "chicken_feed_claim", ("蚂蚁庄园小鸡肥料",), ("领取",)
+            ):
+                elements["chicken_feed_claim"] = action
+            return DetectedScreen(
+                Page.BABA_FARM_TASKS, observation, elements, overlays, ("ui:做任务集肥料",), 0.90
+            )
+        if _has(joined, "芭芭农场") and _visible(tree, "施肥"):
+            return self._screen(Page.BABA_FARM, observation, tree, overlays, {
+                "fertilize": ("施肥",),
+                "free_fertilizer": ("点击领取",),
+                "claim_now": ("立即领肥",),
+            })
+        # Chicken Kitchen (spec line 77). The 献爱心 sub-page is detected before
+        # the main kitchen page; the main page is keyed on "小鸡厨房" so it still
+        # matches after 领今日食材 has been claimed and its text disappears.
+        if _has(joined, "献爱心") and _has(joined, "得食材"):
+            return self._screen(Page.KITCHEN_DONATE, observation, tree, overlays, {
+                "claim": ("领10g食材",),
+            })
+        if _has(joined, "小鸡厨房") and _visible(tree, "做美食"):
             return self._screen(Page.CHICKEN_KITCHEN, observation, tree, overlays, {
-                "cook": ("做美食",), "daily_ingredient": ("领今日食材",),
-                "claim_ingredient": ("领取食材", "领10g食材"), "close": ("关闭",),
+                "cook": ("做美食",),
+                "daily_ingredient": ("领今日食材",),
+                "claim_ingredient": ("领取食材",),
+                "donate_shop": ("爱心食材店",),
+                "close": ("关闭",),
             })
         if _has(joined, "蚂蚁庄园") or _has(joined, "家庭", "领饲料", "去捐蛋"):
             elements = self._elements(observation, tree, {
@@ -509,7 +541,7 @@ class ScreenDetector:
         definitions = (
             (OverlayType.FEED_OVERFLOW, ("饲料袋", "超出上限"), {"confirm_overflow": ("确认", "继续领取")}),
             (OverlayType.PRODUCT_QUIZ, ("猜价格赢饲料", "猜价格赢抽奖"), {"abandon_reward": ("放弃奖励",)}),
-            (OverlayType.REWARD, ("获得奖励", "丰收礼包"), {"close_reward": ("我知道啦", "开心收下", "关闭")}),
+            (OverlayType.REWARD, ("获得奖励", "去蚂蚁森林收能量", "施肥挑战"), {"close_reward": ("我知道啦", "开心收下", "关闭")}),
             (OverlayType.CONFIRMATION, ("确认兑换", "确认喂食"), {"confirm": ("确认兑换", "确认")}),
             (
                 OverlayType.FOOD_SELECTION,

@@ -71,3 +71,51 @@ def test_hidden_donation_modal_does_not_replace_visible_detail_page():
     </hierarchy>"""
     page = ScreenDetector().detect(make_observation(shaped))
     assert page.page is Page.MANOR_DONATION_DETAIL
+
+
+# --- baba farm & chicken kitchen pages (calibration-aware smoke tests) -----
+
+
+def test_baba_farm_harvest_page_detected_before_main_page():
+    page = ScreenDetector().detect(make_observation(xml("丰收礼包", "立即领取", "关闭")))
+    assert page.page is Page.BABA_FARM_HARVEST
+    assert page.element("claim") is not None
+    assert page.element("close") is not None
+
+
+def test_baba_farm_tasks_sub_page_locates_sub_task_claims():
+    shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
+      <node text='做任务集肥料' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[100,200][1300,300]' />
+      <node text='每日签到' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[100,800][900,900]' />
+      <node text='领取' content-desc='' resource-id='' class='TextView' clickable='true' enabled='true' bounds='[1100,800][1300,900]' />
+      <node text='蚂蚁庄园小鸡肥料' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[100,1500][900,1600]' />
+      <node text='领取' content-desc='' resource-id='' class='TextView' clickable='true' enabled='true' bounds='[1100,1500][1300,1600]' />
+      <node text='关闭' content-desc='' resource-id='' class='TextView' clickable='true' enabled='true' bounds='[1300,200][1400,300]' />
+    </hierarchy>"""
+    page = ScreenDetector().detect(make_observation(shaped))
+    assert page.page is Page.BABA_FARM_TASKS
+    assert page.element("daily_sign_claim") is not None
+    assert page.element("chicken_feed_claim") is not None
+    assert page.element("close") is not None
+
+
+def test_baba_farm_main_page_keys_fertilize_free_fertilizer_claim_now():
+    page = ScreenDetector().detect(make_observation(xml("芭芭农场", "施肥", "点击领取", "立即领肥")))
+    assert page.page is Page.BABA_FARM
+    assert page.element("fertilize") is not None
+    assert page.element("free_fertilizer") is not None
+    assert page.element("claim_now") is not None
+
+
+def test_kitchen_donate_sub_page_detected_before_main_kitchen():
+    page = ScreenDetector().detect(make_observation(xml("献爱心 得食材", "领10g食材")))
+    assert page.page is Page.KITCHEN_DONATE
+    assert page.element("claim") is not None
+
+
+def test_chicken_kitchen_main_page_still_detected_without_daily_ingredient():
+    page = ScreenDetector().detect(make_observation(xml("小鸡厨房", "做美食", "爱心食材店", "关闭")))
+    assert page.page is Page.CHICKEN_KITCHEN
+    assert page.element("cook") is not None
+    assert page.element("donate_shop") is not None
+    assert page.element("daily_ingredient") is None
