@@ -482,3 +482,23 @@ def test_recover_backs_out_of_unknown_pages():
 
     assert result.page is Page.MANOR_FEED_TASKS
     assert session.backs == ["recovery-back-1"]
+
+
+def test_sent_tap_returns_restored_expected_page_when_target_moved():
+    # Tapping an energy bubble can open an activity page; Back restores the
+    # home but the floating bubble has drifted, so there is nothing to re-tap.
+    initial = _screen(Page.FOREST_HOME, elements=("energy_0",))
+    campaign = _screen(Page.UNKNOWN)
+    restored = _screen(Page.FOREST_HOME)
+    actions = FakeActions([
+        _result(ActionStatus.REJECTED, point=(10, 10)),
+        _result(ActionStatus.EXECUTED, point=None, after=restored),  # back-out
+    ])
+    session = _session_for_tap(initial, actions, FakeRecovery(initial))
+    session.observe = lambda reason: campaign
+
+    out = session.tap(initial, "energy_0", "forest-own-energy-1", expected=(Page.FOREST_HOME,))
+
+    assert out is restored
+    assert session.current is restored
+    assert actions.calls == ["forest-own-energy-1", "forest-own-energy-1-back-out"]

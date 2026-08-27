@@ -17,6 +17,10 @@ from screen_perception.vision import (
     match_template,
 )
 
+# The 10th-anniversary campaign family (watering page, certificate story,
+# retrospective) shows 蚂蚁森林 and lottery markers inside its Canvas, so both
+# the forest-home and lottery rules must exclude it explicitly.
+_CAMPAIGN_MARKERS = ("上滑种树", "浇水加入", "十年之约", "去种下", "我们的十年", "限定保护罩")
 
 class ScreenDetector:
     def __init__(
@@ -357,7 +361,7 @@ class ScreenDetector:
         # The anniversary campaign shows 活动剩余时间 but is not a lottery;
         # leave it unclassified so recovery backs out of it.
         if _has(joined, "抽奖机会", "立即抽奖", "活动剩余时间") and not _visible(
-            tree, "上滑种树", "浇水加入", "十年之约"
+            tree, *_CAMPAIGN_MARKERS
         ):
             return self._lottery(Page.LOTTERY, observation, tree, overlays)
         # Baba Farm (spec: 支付宝每日任务文字描述.txt line 67). The harvest
@@ -494,7 +498,7 @@ class ScreenDetector:
         # it classifies as the forest home and every carousel swipe runs on the
         # wrong page.
         if _visible(tree, "蚂蚁森林") and not _visible(
-            tree, "上滑种树", "浇水加入", "十年之约"
+            tree, *_CAMPAIGN_MARKERS
         ):
             elements = self._elements(observation, tree, {
                 "find_energy": ("找能量",), "energy_rain": ("天天能量雨", "能量雨"),
@@ -515,6 +519,23 @@ class ScreenDetector:
                         elements["energy_sign"] = _point_element(
                             observation, "energy_sign", (x, y), "cv:energy_sign", confidence
                         )
+                        continue
+                    # Real bubbles are pure Canvas; a green blob inside the
+                    # bounds of a labelled content node is page UI such as the
+                    # anniversary banner's 去种树 pill. The root WebView node
+                    # spans the whole screen, so near-full-screen bounds do
+                    # not count as content.
+                    screen_area = observation.width * observation.height
+                    if any(
+                        node.bounds.valid
+                        and node.bounds.left <= x <= node.bounds.right
+                        and node.bounds.top <= y <= node.bounds.bottom
+                        and (node.bounds.right - node.bounds.left)
+                        * (node.bounds.bottom - node.bounds.top)
+                        <= screen_area * 0.20
+                        for node in tree.nodes
+                        if node.text or node.description
+                    ):
                         continue
                     key = f"energy_{energy_index}"
                     energy_index += 1

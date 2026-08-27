@@ -217,7 +217,8 @@ class WorkflowSession:
             ):
                 self.current = fresh
                 return fresh
-            if not (fresh.page is screen.page and fresh.element(key) is not None):
+            restored = fresh
+            if not (restored.page is screen.page and restored.element(key) is not None):
                 try:
                     _back_result, after_back = self.actions.execute(
                         fresh, Action(f"{name}-back-out", ActionKind.BACK), ()
@@ -225,14 +226,20 @@ class WorkflowSession:
                     self.result.actions.append(_back_result)
                 except Exception:
                     after_back = None
-                if after_back is None or not (
-                    after_back.page is screen.page and after_back.element(key) is not None
-                ):
-                    raise AutomationError(result.error or f"Action failed: {name}")
-                fresh = after_back
-            result, after = self._tap_raw(fresh, key, name, expected, required_after)
-            if result.status is ActionStatus.EXECUTED and after is not None:
-                return after
+                if after_back is not None:
+                    restored = after_back
+            if restored.page in expected and all(
+                restored.element(item) is not None for item in required_after
+            ):
+                # Back succeeded and the page the action was validated against
+                # is back. A floating target (an energy bubble) may have moved
+                # on, so re-looking it up is not required; the caller rescans.
+                self.current = restored
+                return restored
+            if restored.page is screen.page and restored.element(key) is not None:
+                result, after = self._tap_raw(restored, key, name, expected, required_after)
+                if result.status is ActionStatus.EXECUTED and after is not None:
+                    return after
             raise AutomationError(result.error or f"Action failed: {name}")
         finally:
             self._recovering = False
