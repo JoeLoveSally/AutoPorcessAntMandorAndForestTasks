@@ -1,6 +1,8 @@
+import cv2
+import numpy as np
 from conftest import make_observation
 
-from domain_data import OverlayType, Page
+from domain_data import Bounds, OverlayType, Page
 from screen_perception import ScreenDetector
 
 
@@ -99,12 +101,52 @@ def test_baba_farm_tasks_sub_page_locates_sub_task_claims():
     assert page.element("close") is not None
 
 
+def test_baba_task_list_is_not_misclassified_as_external_browse():
+    shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
+      <node text='做任务集肥料' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[0,856][1440,1192]' />
+      <node text='浏览15秒得1500肥' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[88,1852][1064,2036]' />
+      <node text='森林10周年浇水得好礼' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[88,2848][1064,3032]' />
+      <node text='参与施肥挑战赢大额奖励' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[400,1016][1012,1092]' />
+      <node text='关闭做任务集肥料弹窗' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[1260,1032][1380,1148]' />
+      <node text='关闭' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[656,2340][784,2464]' />
+    </hierarchy>"""
+    page = ScreenDetector().detect(make_observation(shaped))
+    assert page.page is Page.BABA_FARM_TASKS
+    assert page.element("close_reward").bounds == Bounds(656, 2340, 784, 2464)
+
+
+def test_farm_challenge_banner_without_modal_close_is_not_an_overlay():
+    shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
+      <node text='做任务集肥料' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[0,856][1440,1192]' />
+      <node text='参与施肥挑战赢大额奖励' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[400,1016][1012,1092]' />
+      <node text='关闭做任务集肥料弹窗' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[1260,1032][1380,1148]' />
+      <node text='关闭' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[1244,188][1406,308]' />
+    </hierarchy>"""
+    page = ScreenDetector().detect(make_observation(shaped))
+    assert page.page is Page.BABA_FARM_TASKS
+    assert not page.overlays
+
+
 def test_baba_farm_main_page_keys_fertilize_free_fertilizer_claim_now():
     page = ScreenDetector().detect(make_observation(xml("芭芭农场", "施肥", "点击领取", "立即领肥")))
     assert page.page is Page.BABA_FARM
     assert page.element("fertilize") is not None
     assert page.element("free_fertilizer") is not None
     assert page.element("claim_now") is not None
+
+
+def test_baba_farm_banner_text_is_not_used_as_fertilize_action():
+    shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
+      <node text='芭芭农场' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[152,203][652,293]' />
+      <node text='施肥赢3000肥料' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[400,928][1012,1020]' />
+      <node text='还差4次领肥料' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[540,1852][900,1944]' />
+    </hierarchy>"""
+    ok, encoded = cv2.imencode(".png", np.zeros((3200, 1440, 3), dtype=np.uint8))
+    assert ok
+    page = ScreenDetector().detect(make_observation(shaped, screenshot=encoded.tobytes()))
+    assert page.page is Page.BABA_FARM
+    assert page.element("fertilize").source == "cv_layout:baba_farm_fertilize"
+    assert page.element("fertilize").center == (720, 2464)
 
 
 def test_kitchen_donate_sub_page_detected_before_main_kitchen():
@@ -119,3 +161,54 @@ def test_chicken_kitchen_main_page_still_detected_without_daily_ingredient():
     assert page.element("cook") is not None
     assert page.element("donate_shop") is not None
     assert page.element("daily_ingredient") is None
+
+
+def test_canvas_chicken_kitchen_detects_visible_layout_controls():
+    image = np.full((3200, 1440, 3), (220, 170, 115), dtype=np.uint8)
+    cv2.rectangle(image, (800, 2820), (1390, 3120), (20, 165, 245), -1)
+    cv2.circle(image, (420, 600), 90, (15, 100, 245), -1)
+    cv2.rectangle(image, (1080, 2360), (1400, 2510), (20, 40, 245), -1)
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+
+    page = ScreenDetector().detect(make_observation(xml(), screenshot=encoded.tobytes()))
+
+    assert page.page is Page.CHICKEN_KITCHEN
+    assert {"cook", "claim_ingredient", "daily_ingredient", "donate_shop"} <= page.elements.keys()
+
+
+def test_canvas_kitchen_recipe_exposes_only_close():
+    image = np.full((3200, 1440, 3), 30, dtype=np.uint8)
+    cv2.rectangle(image, (200, 860), (1240, 2150), (235, 245, 250), -1)
+    cv2.circle(image, (720, 2688), 70, (255, 255, 255), 12)
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+
+    page = ScreenDetector().detect(make_observation(xml(), screenshot=encoded.tobytes()))
+
+    assert page.page is Page.CHICKEN_KITCHEN
+    assert set(page.elements) == {"close"}
+    assert page.element("close").center == (720, 2688)
+
+
+def test_bright_canvas_task_cards_do_not_look_like_kitchen_recipe():
+    image = np.full((3200, 1440, 3), 35, dtype=np.uint8)
+    cv2.rectangle(image, (40, 800), (1400, 3100), (245, 225, 190), -1)
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+
+    page = ScreenDetector().detect(make_observation(xml(), screenshot=encoded.tobytes()))
+
+    assert page.page is Page.UNKNOWN
+
+
+def test_canvas_kitchen_donate_detects_optional_claim():
+    image = np.full((3200, 1440, 3), (25, 70, 110), dtype=np.uint8)
+    cv2.rectangle(image, (850, 850), (1180, 1020), (20, 40, 245), -1)
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+
+    page = ScreenDetector().detect(make_observation(xml(), screenshot=encoded.tobytes()))
+
+    assert page.page is Page.KITCHEN_DONATE
+    assert page.element("claim") is not None

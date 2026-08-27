@@ -6,8 +6,10 @@ from pathlib import Path
 from domain_data import Bounds, DetectedScreen, Element, Observation, Overlay, OverlayType, Page
 from screen_perception.ui_tree import UiTree
 from screen_perception.vision import (
+    detect_chicken_kitchen_controls,
     detect_family_task_controls,
     detect_green_energy_balls,
+    detect_kitchen_donate_controls,
     detect_manor_home_controls,
     detect_yellow_right_button,
     match_template,
@@ -53,13 +55,14 @@ class ScreenDetector:
     def _external(self, observation, tree, labels, overlays):
         if tree is None:
             return None
-        joined = " ".join(labels)
-        if _has(
-            joined,
+        # Generic task-card descriptions such as "浏览15秒" remain visible in
+        # several task-list WebViews.  They do not prove that navigation has
+        # reached the external timed page; require a rendered progress marker.
+        if _visible(
+            tree,
             "任务 浏览完成",
             "已完成 可领饲料",
             "已完成 可领奖励",
-            "浏览15秒",
             "滑动浏览",
             "任务倒计时",
         ):
@@ -88,6 +91,44 @@ class ScreenDetector:
         if tree is None:
             return None
         joined = " ".join(labels)
+        # Chicken Kitchen and its donation shop are Canvas-only on current
+        # Alipay builds: the UI tree contains one unlabelled Image node.  Use
+        # the visual layout before text rules so the workflow can also observe
+        # recipe popups and already-claimed states.
+        if observation.screenshot:
+            if controls := detect_chicken_kitchen_controls(observation.screenshot):
+                return DetectedScreen(
+                    Page.CHICKEN_KITCHEN,
+                    observation,
+                    {
+                        key: _point_element(
+                            observation, key, (x, y), f"cv_layout:kitchen_{key}", confidence
+                        )
+                        for key, (x, y, confidence) in controls.items()
+                    },
+                    overlays,
+                    ("cv:kitchen_canvas",),
+                    0.88,
+                )
+            donate_controls = detect_kitchen_donate_controls(observation.screenshot)
+            if donate_controls is not None:
+                return DetectedScreen(
+                    Page.KITCHEN_DONATE,
+                    observation,
+                    {
+                        key: _point_element(
+                            observation,
+                            key,
+                            (x, y),
+                            f"cv_layout:kitchen_donate_{key}",
+                            confidence,
+                        )
+                        for key, (x, y, confidence) in donate_controls.items()
+                    },
+                    overlays,
+                    ("cv:kitchen_donate_canvas",),
+                    0.86,
+                )
         if "我已助力" in joined and "去捐蛋" in joined:
             return self._screen(
                 Page.MANOR_DONATION_PROJECTS,
@@ -289,11 +330,32 @@ class ScreenDetector:
                 Page.BABA_FARM_TASKS, observation, elements, overlays, ("ui:做任务集肥料",), 0.90
             )
         if _has(joined, "芭芭农场") and _visible(tree, "施肥"):
-            return self._screen(Page.BABA_FARM, observation, tree, overlays, {
-                "fertilize": ("施肥",),
+            elements = self._elements(observation, tree, {
                 "free_fertilizer": ("点击领取",),
                 "claim_now": ("立即领肥",),
             })
+            # The real farm exposes banner copy containing "施肥" but not the
+            # large Canvas fertilise button. Prefer an exact accessibility
+            # action when available; otherwise use the calibrated main-button
+            # position, never the first text fragment containing "施肥".
+            if fertilize := tree.element(observation.id, "fertilize", "施肥"):
+                elements["fertilize"] = fertilize
+            elif observation.screenshot:
+                elements["fertilize"] = _point_element(
+                    observation,
+                    "fertilize",
+                    (round(observation.width * 0.50), round(observation.height * 0.77)),
+                    "cv_layout:baba_farm_fertilize",
+                    0.86,
+                )
+            return DetectedScreen(
+                Page.BABA_FARM,
+                observation,
+                elements,
+                overlays,
+                ("ui:芭芭农场",),
+                0.90,
+            )
         # Chicken Kitchen (spec line 77). The 献爱心 sub-page is detected before
         # the main kitchen page; the main page is keyed on "小鸡厨房" so it still
         # matches after 领今日食材 has been claimed and its text disappears.
@@ -340,7 +402,7 @@ class ScreenDetector:
             return self._screen(Page.FOREST_LOVE_PLANT, observation, tree, overlays, {
                 "water": ("为爱攒能量", "攒能量"), "plus": ("+",), "confirm": ("攒能量",),
             })
-        if _visible(tree, "浇水") and "真爱合种" not in joined:
+        if _visible(tree, "浇水") and _visible(tree, "合种") and "真爱合种" not in joined:
             return self._screen(Page.FOREST_CO_PLANT, observation, tree, overlays, {
                 "water": ("浇水",), "confirm": ("浇水",),
             })
@@ -552,7 +614,25 @@ class ScreenDetector:
         result: list[Overlay] = []
         for overlay_type, markers, mapping in definitions:
             if any(marker in joined for marker in markers):
-                result.append(Overlay(overlay_type, self._elements(observation, tree, mapping), markers, 0.95))
+                elements = self._elements(observation, tree, mapping)
+                # WebViews often expose several controls containing "关闭" at
+                # once.  For modal dismissal prefer an exact visible label so
+                # a task-list close button is not selected behind the popup.
+                if "close_reward" in mapping:
+                    exact = _modal_exact_element(
+                        observation,
+                        tree,
+                        "close_reward",
+                        mapping["close_reward"],
+                    )
+                    if exact is not None:
+                        elements["close_reward"] = exact
+                    elif overlay_type is OverlayType.REWARD and not _visible(tree, "获得奖励"):
+                        # "施肥挑战" also exists as a persistent farm banner.
+                        # Without a modal action away from the app bar it is
+                        # background content, not an overlay.
+                        continue
+                result.append(Overlay(overlay_type, elements, markers, 0.95))
         return result
 
 
@@ -582,4 +662,33 @@ def _point_element(
         observation.id,
         source=source,
         confidence=confidence,
+    )
+
+
+def _modal_exact_element(
+    observation: Observation,
+    tree: UiTree,
+    key: str,
+    labels: tuple[str, ...],
+) -> Element | None:
+    wanted = {label.strip() for label in labels}
+    nodes = [
+        node
+        for node in tree.nodes
+        if node.bounds.valid
+        and observation.height * 0.15 < node.bounds.center[1] < observation.height * 0.95
+        and (node.text.strip() in wanted or node.description.strip() in wanted)
+    ]
+    if not nodes:
+        return None
+    node = nodes[0]
+    action = node.action_node
+    return Element(
+        key,
+        action.bounds,
+        observation.id,
+        node.text or node.description,
+        action.clickable or action is node,
+        action.enabled,
+        "ui_tree:modal_exact",
     )

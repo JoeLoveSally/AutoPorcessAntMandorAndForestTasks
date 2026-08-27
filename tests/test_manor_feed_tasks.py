@@ -124,12 +124,12 @@ def test_baba_farm_full_flow_matches_spec_sequence():
     tasks_page = _screen(Page.BABA_FARM_TASKS, ("daily_sign_claim", "chicken_feed_claim", "close"))
     after_sign = _screen(Page.BABA_FARM_TASKS, ("chicken_feed_claim", "close"))
     after_chicken = _screen(Page.BABA_FARM_TASKS, ("close",))
-    farm_main = _screen(Page.BABA_FARM, ("fertilize", "free_fertilizer", "claim_now"))
-    farm_after_free = _screen(Page.BABA_FARM, ("fertilize", "claim_now"))
+    farm_main = _screen(Page.BABA_FARM, ("fertilize", "free_fertilizer"))
+    farm_after_free = _screen(Page.BABA_FARM, ("fertilize",))
     farm_after_fert1 = _screen(Page.BABA_FARM, ("claim_now",))
     harvest1 = _screen(Page.BABA_FARM_HARVEST, ("claim", "close"))
     harvest1_after_claim = _screen(Page.BABA_FARM_HARVEST, ("close",))
-    farm_after_harvest1 = _screen(Page.BABA_FARM, ("fertilize", "claim_now"))
+    farm_after_harvest1 = _screen(Page.BABA_FARM, ("fertilize",))
     farm_after_fert2 = _screen(Page.BABA_FARM, ("claim_now",))
     harvest2 = _screen(Page.BABA_FARM_HARVEST, ("claim", "close"))
     harvest2_after_claim = _screen(Page.BABA_FARM_HARVEST, ("close",))
@@ -159,8 +159,11 @@ def test_baba_farm_full_flow_matches_spec_sequence():
     assert session.device.backs == 1
     # 做任务集肥料 close must expect the farm main page, not the feed list.
     assert session.taps[3] == ("close", (Page.BABA_FARM,))
-    # Harvest claim stays on the harvest page; close returns to the farm.
-    assert session.taps[7] == ("claim", (Page.BABA_FARM_HARVEST,))
+    # Harvest claim may stay on the pack or auto-close to the farm.
+    assert session.taps[7] == (
+        "claim",
+        (Page.BABA_FARM_HARVEST, Page.BABA_FARM),
+    )
     assert session.taps[8] == ("close", (Page.BABA_FARM,))
 
 
@@ -178,6 +181,53 @@ def test_baba_farm_skips_optional_actions_when_elements_absent():
     keys = [key for key, _ in session.taps]
     assert keys == ["farm", "fertilize", "fertilize"]
     assert session.device.backs == 1
+
+
+def test_baba_farm_claims_ready_harvest_without_extra_fertilize():
+    feed = _screen(Page.MANOR_FEED_TASKS, ("farm",))
+    farm_ready_1 = _screen(Page.BABA_FARM, ("fertilize", "claim_now"))
+    harvest1 = _screen(Page.BABA_FARM_HARVEST, ("claim", "close"))
+    harvest1_claimed = _screen(Page.BABA_FARM_HARVEST, ("close",))
+    farm_ready_2 = _screen(Page.BABA_FARM, ("fertilize", "claim_now"))
+    harvest2 = _screen(Page.BABA_FARM_HARVEST, ("claim", "close"))
+    harvest2_claimed = _screen(Page.BABA_FARM_HARVEST, ("close",))
+    farm_done = _screen(Page.BABA_FARM, ("fertilize",))
+    feed_return = _screen(Page.MANOR_FEED_TASKS)
+    session = ScriptedSession([
+        farm_ready_1,
+        harvest1,
+        harvest1_claimed,
+        farm_ready_2,
+        harvest2,
+        harvest2_claimed,
+        farm_done,
+        feed_return,
+    ])
+    workflow = _baba_workflow(session)
+
+    workflow._baba_farm(feed)
+
+    keys = [key for key, _ in session.taps]
+    assert keys == [
+        "farm",
+        "claim_now", "claim", "close",
+        "claim_now", "claim", "close",
+    ]
+    assert "fertilize" not in keys
+
+
+def test_baba_harvest_accepts_claim_that_auto_closes_to_farm():
+    harvest = _screen(Page.BABA_FARM_HARVEST, ("claim", "close"))
+    farm = _screen(Page.BABA_FARM, ("fertilize",))
+    session = ScriptedSession([farm])
+    workflow = _baba_workflow(session)
+
+    out = workflow._baba_harvest(harvest)
+
+    assert out.page is Page.BABA_FARM
+    assert session.taps == [
+        ("claim", (Page.BABA_FARM_HARVEST, Page.BABA_FARM)),
+    ]
 
 
 def test_baba_farm_dismisses_farm_popup_after_fertilize():
@@ -201,6 +251,46 @@ def test_baba_farm_dismisses_farm_popup_after_fertilize():
     ]
     assert session.taps[2] == ("close_reward", (Page.BABA_FARM,))
     assert session.device.backs == 1
+
+
+def test_baba_farm_dismisses_entry_popup_before_task_claims():
+    feed = _screen(Page.MANOR_FEED_TASKS, ("farm",))
+    entry_popup = _screen(
+        Page.BABA_FARM_TASKS,
+        ("daily_sign_claim", "chicken_feed_claim", "close", "close_reward"),
+    )
+    tasks_page = _screen(
+        Page.BABA_FARM_TASKS,
+        ("daily_sign_claim", "chicken_feed_claim", "close"),
+    )
+    after_sign = _screen(Page.BABA_FARM_TASKS, ("chicken_feed_claim", "close"))
+    after_chicken = _screen(Page.BABA_FARM_TASKS, ("close",))
+    farm = _screen(Page.BABA_FARM, ("fertilize",))
+    after_fert1 = _screen(Page.BABA_FARM, ("fertilize",))
+    after_fert2 = _screen(Page.BABA_FARM, ("fertilize",))
+    feed_return = _screen(Page.MANOR_FEED_TASKS)
+    session = ScriptedSession([
+        entry_popup,
+        tasks_page,
+        after_sign,
+        after_chicken,
+        farm,
+        after_fert1,
+        after_fert2,
+        feed_return,
+    ])
+    workflow = _baba_workflow(session)
+
+    workflow._baba_farm(feed)
+
+    assert [key for key, _ in session.taps][:5] == [
+        "farm",
+        "close_reward",
+        "daily_sign_claim",
+        "chicken_feed_claim",
+        "close",
+    ]
+    assert session.taps[1] == ("close_reward", (Page.BABA_FARM_TASKS,))
 
 
 def test_baba_farm_raises_when_fertilize_disappears():

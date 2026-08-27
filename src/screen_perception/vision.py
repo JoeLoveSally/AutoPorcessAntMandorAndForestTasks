@@ -180,3 +180,140 @@ def detect_family_task_controls(content: bytes) -> dict[str, tuple[int, int, flo
             _, point, _, saturation = max(options, key=lambda item: item[2])
             result[key if saturation >= 120 else disabled_key] = (*point, 0.86)
     return result
+
+
+def detect_chicken_kitchen_controls(
+    content: bytes,
+) -> dict[str, tuple[int, int, float]] | None:
+    """Detect the Canvas-only chicken-kitchen page and its visible controls.
+
+    Alipay exposes this mini-app as one WebView image, so neither the page title
+    nor its buttons appear in the accessibility tree.  The kitchen has a
+    stable responsive layout: a large orange cook button in the bottom-right,
+    an ingredient tree in the upper-left, and an optional recipe card over a
+    dimmed background.  Coordinates are expressed as screen ratios so the
+    detector is not tied to the calibration phone's pixel resolution.
+    """
+    image = decode_png(content)
+    height, width = image.shape[:2]
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    orange = cv2.inRange(hsv, (5, 85, 120), (38, 255, 255))
+    count, _, stats, centers = cv2.connectedComponentsWithStats(orange)
+
+    cook_candidates: list[tuple[int, tuple[int, int]]] = []
+    for (_left, _top, item_width, item_height, area), (x, y) in zip(
+        stats[1:count], centers[1:count], strict=True
+    ):
+        if (
+            x > width * 0.62
+            and y > height * 0.86
+            and item_width > width * 0.25
+            and item_height > height * 0.035
+        ):
+            cook_candidates.append((int(area), (round(x), round(y))))
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    card = gray[int(height * 0.27) : int(height * 0.67), int(width * 0.14) : int(width * 0.86)]
+    corners = np.concatenate(
+        (
+            gray[: int(height * 0.12), : int(width * 0.18)].ravel(),
+            gray[: int(height * 0.12), int(width * 0.82) :].ravel(),
+        )
+    )
+    close_region = gray[
+        int(height * 0.80) : int(height * 0.88),
+        int(width * 0.43) : int(width * 0.57),
+    ]
+    recipe_open = bool(
+        card.size
+        and corners.size
+        and close_region.size
+        and np.mean(card) > 135
+        and np.mean(corners) < 95
+        # The recipe card has a white outlined X over the dark scrim at the
+        # bottom centre. Bright feed-task cards can satisfy the two broad
+        # brightness checks above, but do not contain this dark close region.
+        and np.mean(close_region > 225) > 0.03
+        and np.mean(close_region < 70) > 0.30
+    )
+    if not cook_candidates and not recipe_open:
+        return None
+
+    result: dict[str, tuple[int, int, float]] = {
+        "donate_shop": (round(width * 0.17), round(height * 0.36), 0.82),
+    }
+    if cook_candidates:
+        point = max(cook_candidates)[1]
+        result["cook"] = (*point, 0.90)
+    ingredient_orange = cv2.inRange(hsv, (5, 120, 150), (30, 255, 255))
+    ingredient_region = ingredient_orange[
+        int(height * 0.15) : int(height * 0.24),
+        int(width * 0.22) : int(width * 0.38),
+    ]
+    if (
+        ingredient_region.size
+        and cv2.countNonZero(ingredient_region) / ingredient_region.size > 0.08
+    ):
+        result["claim_ingredient"] = (
+            round(width * 0.292),
+            round(height * 0.188),
+            0.84,
+        )
+
+    red = cv2.bitwise_or(
+        cv2.inRange(hsv, (0, 100, 150), (12, 255, 255)),
+        cv2.inRange(hsv, (168, 90, 130), (179, 255, 255)),
+    )
+    red_count, _, red_stats, red_centers = cv2.connectedComponentsWithStats(red)
+    daily_candidates: list[tuple[int, tuple[int, int]]] = []
+    for (_left, _top, item_width, item_height, area), (x, y) in zip(
+        red_stats[1:red_count], red_centers[1:red_count], strict=True
+    ):
+        if (
+            x > width * 0.72
+            and height * 0.68 < y < height * 0.83
+            and item_width > width * 0.14
+            and item_height > height * 0.025
+        ):
+            daily_candidates.append((int(area), (round(x), round(y))))
+    if daily_candidates:
+        point = max(daily_candidates)[1]
+        result["daily_ingredient"] = (*point, 0.86)
+    if recipe_open:
+        result = {"close": (round(width * 0.50), round(height * 0.84), 0.90)}
+    return result
+
+
+def detect_kitchen_donate_controls(
+    content: bytes,
+) -> dict[str, tuple[int, int, float]] | None:
+    """Detect the Canvas-only love-ingredient shop and its optional claim."""
+    image = decode_png(content)
+    height, width = image.shape[:2]
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    lower = hsv[int(height * 0.32) :, :, :]
+    brown = cv2.inRange(lower, (0, 75, 25), (28, 255, 190))
+    if brown.size == 0 or cv2.countNonZero(brown) / brown.size < 0.42:
+        return None
+
+    result: dict[str, tuple[int, int, float]] = {}
+    red = cv2.bitwise_or(
+        cv2.inRange(hsv, (0, 110, 150), (12, 255, 255)),
+        cv2.inRange(hsv, (168, 100, 140), (179, 255, 255)),
+    )
+    count, _, stats, centers = cv2.connectedComponentsWithStats(red)
+    candidates: list[tuple[int, tuple[int, int]]] = []
+    for (_left, _top, item_width, item_height, area), (x, y) in zip(
+        stats[1:count], centers[1:count], strict=True
+    ):
+        if (
+            x > width * 0.55
+            and height * 0.22 < y < height * 0.38
+            and item_width > width * 0.14
+            and item_height > height * 0.025
+        ):
+            candidates.append((int(area), (round(x), round(y))))
+    if candidates:
+        point = max(candidates)[1]
+        result["claim"] = (*point, 0.88)
+    return result

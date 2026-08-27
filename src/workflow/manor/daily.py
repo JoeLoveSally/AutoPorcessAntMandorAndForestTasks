@@ -170,6 +170,17 @@ class ManorWorkflow:
             if not tasks.element(key):
                 self.session.add_step(name, StepStatus.NOT_AVAILABLE)
                 continue
+            if (
+                not claim_to_refresh
+                and tasks.element(key).text
+                and "领取" in tasks.element(key).text
+            ):
+                self.session.add_step(
+                    name,
+                    StepStatus.ALREADY_DONE,
+                    "task reward intentionally left unclaimed",
+                )
+                continue
             if key == "farm":
                 tasks = self._baba_farm(tasks)
             elif key == "kitchen":
@@ -274,6 +285,7 @@ class ManorWorkflow:
         farm = self.session.tap(
             tasks, "farm", "baba-farm-open", (Page.BABA_FARM, Page.BABA_FARM_TASKS)
         )
+        farm = self._dismiss_farm_popup(farm)
         if farm.page is Page.BABA_FARM_TASKS:
             farm = self._baba_farm_tasks(farm)
         if farm.element("free_fertilizer"):
@@ -282,12 +294,16 @@ class ManorWorkflow:
             )
             farm = self._dismiss_farm_popup(farm)
         for index in range(2):
-            if not farm.element("fertilize"):
-                raise AutomationError("Baba Farm lost the fertilise action mid-flow")
-            farm = self.session.tap(
-                farm, "fertilize", f"baba-fertilize-{index + 1}", (Page.BABA_FARM,)
-            )
-            farm = self._dismiss_farm_popup(farm)
+            # With one-key fertilising enabled, the first action may already
+            # unlock the next harvest. Do not spend more fertilizer when the
+            # current page is ready to claim.
+            if not farm.element("claim_now"):
+                if not farm.element("fertilize"):
+                    raise AutomationError("Baba Farm lost the fertilise action mid-flow")
+                farm = self.session.tap(
+                    farm, "fertilize", f"baba-fertilize-{index + 1}", (Page.BABA_FARM,)
+                )
+                farm = self._dismiss_farm_popup(farm)
             if farm.element("claim_now"):
                 farm = self.session.tap(
                     farm, "claim_now", f"baba-claim-now-{index + 1}", (Page.BABA_FARM_HARVEST,)
@@ -311,7 +327,12 @@ class ManorWorkflow:
 
     def _baba_harvest(self, farm):
         if farm.element("claim"):
-            farm = self.session.tap(farm, "claim", "baba-harvest-claim", (Page.BABA_FARM_HARVEST,))
+            farm = self.session.tap(
+                farm,
+                "claim",
+                "baba-harvest-claim",
+                (Page.BABA_FARM_HARVEST, Page.BABA_FARM),
+            )
         if farm.element("close"):
             farm = self.session.tap(farm, "close", "baba-harvest-close", (Page.BABA_FARM,))
         return farm
@@ -319,8 +340,13 @@ class ManorWorkflow:
     def _dismiss_farm_popup(self, farm):
         # 去蚂蚁森林收能量 / 施肥挑战 popups sit over the farm after an action;
         # close them so they don't block the next step. (Calibration point.)
-        if farm.page is Page.BABA_FARM and farm.element("close_reward"):
-            return self.session.tap(farm, "close_reward", "baba-dismiss-popup", (Page.BABA_FARM,))
+        if farm.page in (Page.BABA_FARM, Page.BABA_FARM_TASKS) and farm.element("close_reward"):
+            return self.session.tap(
+                farm,
+                "close_reward",
+                "baba-dismiss-popup",
+                (farm.page,),
+            )
         return farm
 
     def _locate_in_page(self, current, key, page, name, *, required=True):
