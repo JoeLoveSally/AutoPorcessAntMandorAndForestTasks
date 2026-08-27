@@ -100,6 +100,21 @@ def test_recover_dismisses_product_quiz_overlay_then_returns():
     assert session.taps == ["abandon_reward"]
 
 
+def test_recover_dismisses_canvas_promo_overlay_via_close():
+    home = _screen(Page.FOREST_HOME)
+    covered = _screen(Page.FOREST_HOME, (_overlay(OverlayType.PROMO, "close"),))
+    session = FakeSession(
+        observe_seq=[covered],
+        tap_after={"close": home},
+    )
+    policy = RecoveryPolicy(session)
+
+    result = policy.recover(covered, (Page.FOREST_HOME,))
+
+    assert result.page is Page.FOREST_HOME
+    assert session.taps == ["close"]
+
+
 def test_recover_backs_out_of_wrong_known_page():
     wrong = _screen(Page.FOREST_HOME)
     feed = _screen(Page.MANOR_FEED_TASKS)

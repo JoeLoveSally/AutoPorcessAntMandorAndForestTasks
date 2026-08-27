@@ -31,7 +31,12 @@ class RecoveryPolicy:
                 key = next(
                     (
                         candidate
-                        for candidate in ("abandon_reward", "close_reward", "confirm_overflow")
+                        for candidate in (
+                            "abandon_reward",
+                            "close_reward",
+                            "confirm_overflow",
+                            "close",
+                        )
                         if candidate in overlay.elements
                     ),
                     None,

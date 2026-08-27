@@ -212,3 +212,62 @@ def test_canvas_kitchen_donate_detects_optional_claim():
 
     assert page.page is Page.KITCHEN_DONATE
     assert page.element("claim") is not None
+
+
+# --- canvas promo scrim overlay --------------------------------------------
+
+
+def promo_screenshot() -> bytes:
+    """The shared promo signature: dark scrim, raised card, centre-bottom X."""
+    image = np.full((3200, 1440, 3), 28, dtype=np.uint8)
+    cv2.rectangle(image, (200, 860), (1240, 2150), (110, 150, 190), -1)
+    cv2.circle(image, (722, 2734), 34, (140, 140, 140), 10)
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+    return encoded.tobytes()
+
+
+def forest_home_xml() -> str:
+    shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
+      <node text='蚂蚁森林' content-desc='' resource-id='' class='WebView' clickable='false' enabled='true' bounds='[0,0][1440,3200]' />
+      <node text='森林广场' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[60,2304][300,2400]' />
+      <node text='1 能量雨' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[580,2408][848,2724]' />
+      <node text='真爱合种' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[1104,2408][1368,2724]' />
+      <node text='合种' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[1364,2408][1440,2724]' />
+    </hierarchy>"""
+    return shaped
+
+
+def test_promo_scrim_attaches_dismissible_overlay_to_covered_page():
+    page = ScreenDetector().detect(
+        make_observation(forest_home_xml(), screenshot=promo_screenshot())
+    )
+
+    assert page.page is Page.FOREST_HOME
+    assert [overlay.type for overlay in page.overlays] == [OverlayType.PROMO]
+    close = page.element("close")
+    assert close is not None
+    assert close.source == "cv:modal_scrim_close"
+    # The page elements stay usable for the recovery re-entry tap.
+    assert page.element("love_plant") is not None
+
+
+def test_promo_scrim_skipped_when_page_has_its_own_modal_controls():
+    shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
+      <node text='丰收礼包' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[100,200][1300,300]' />
+      <node text='立即领取' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[400,1500][1040,1700]' />
+      <node text='关闭' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[656,2670][784,2790]' />
+    </hierarchy>"""
+    page = ScreenDetector().detect(
+        make_observation(shaped, screenshot=promo_screenshot())
+    )
+
+    assert page.page is Page.BABA_FARM_HARVEST
+    assert page.overlays == ()
+    assert page.element("close") is not None
+
+
+def test_promo_scrim_ignored_without_screenshot():
+    page = ScreenDetector().detect(make_observation(forest_home_xml()))
+    assert page.page is Page.FOREST_HOME
+    assert page.overlays == ()

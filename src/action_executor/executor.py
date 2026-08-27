@@ -4,7 +4,15 @@ import time
 from collections.abc import Callable
 
 from device_bridge.adb import AndroidDevice
-from domain_data import Action, ActionKind, ActionResult, ActionStatus, DetectedScreen, Page
+from domain_data import (
+    Action,
+    ActionKind,
+    ActionResult,
+    ActionStatus,
+    DetectedScreen,
+    OverlayType,
+    Page,
+)
 from logger import RunLogger
 from runtime.errors import SafetyStop
 from screen_perception import ObservationCollector, ObservationMode, ScreenDetector
@@ -53,6 +61,17 @@ class ActionExecutor:
                     raise SafetyStop(f"Element is stale: {action.element_key}")
                 if not element.enabled or not element.clickable or not element.bounds.valid:
                     raise SafetyStop(f"Element is not executable: {action.element_key}")
+                blocking = [
+                    overlay.type.value
+                    for overlay in screen.overlays
+                    if overlay.type is OverlayType.PROMO
+                    and action.element_key not in overlay.elements
+                ]
+                if blocking:
+                    # The promo scrim swallows every touch, so the page element
+                    # underneath cannot receive this tap. Refuse before anything
+                    # is sent so recovery can dismiss the promo and retry.
+                    raise SafetyStop(f"Refusing tap under overlay: {', '.join(blocking)}")
                 point = element.center
                 if not self.device.size().contains(point):
                     raise SafetyStop(f"Element lies outside the current screen: {point}")

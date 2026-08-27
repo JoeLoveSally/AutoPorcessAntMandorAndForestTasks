@@ -11,6 +11,7 @@ from screen_perception.vision import (
     detect_green_energy_balls,
     detect_kitchen_donate_controls,
     detect_manor_home_controls,
+    detect_modal_scrim,
     detect_yellow_right_button,
     match_template,
 )
@@ -44,12 +45,57 @@ class ScreenDetector:
         ):
             result = detector(observation, tree, labels, overlays)
             if result is not None:
-                return result
-        return DetectedScreen(
-            Page.UNKNOWN,
+                return self._with_promo_overlay(observation, result)
+        return self._with_promo_overlay(
             observation,
-            overlays=overlays,
-            evidence=tuple(observation.errors) or ("no_page_rule_matched",),
+            DetectedScreen(
+                Page.UNKNOWN,
+                observation,
+                overlays=overlays,
+                evidence=tuple(observation.errors) or ("no_page_rule_matched",),
+            ),
+        )
+
+    def _with_promo_overlay(
+        self,
+        observation: Observation,
+        result: DetectedScreen,
+    ) -> DetectedScreen:
+        """Attach a Canvas promo scrim, when present, as a dismissible overlay.
+
+        Activity promos cover the page with a touch-swallowing scrim that the
+        accessibility tree cannot see (forest anniversary skins, game-centre
+        popups).  Publishing them as an overlay lets the executor refuse taps
+        on the covered page elements and recovery dismiss them.  Pages that
+        already expose their own modal controls (harvest pack, recipe card)
+        keep their tree-provided elements and get no second overlay.
+        """
+        if not observation.screenshot:
+            return result
+        dismiss_keys = ("close", "close_reward", "abandon_reward", "confirm_overflow")
+        if any(key in result.elements for key in dismiss_keys):
+            return result
+        if any(key in overlay.elements for overlay in result.overlays for key in dismiss_keys):
+            return result
+        scrim = detect_modal_scrim(observation.screenshot)
+        if scrim is None:
+            return result
+        x, y, confidence = scrim
+        close = Element(
+            "close",
+            Bounds(x - 70, y - 70, x + 70, y + 70),
+            observation.id,
+            "关闭",
+            source="cv:modal_scrim_close",
+            confidence=confidence,
+        )
+        return DetectedScreen(
+            result.page,
+            result.observation,
+            result.elements,
+            (*result.overlays, Overlay(OverlayType.PROMO, {"close": close}, ("cv:modal_scrim",), confidence)),
+            result.evidence,
+            result.confidence,
         )
 
     def _external(self, observation, tree, labels, overlays):

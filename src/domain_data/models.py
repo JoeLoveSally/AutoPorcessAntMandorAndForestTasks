@@ -49,6 +49,7 @@ class OverlayType(StrEnum):
     REWARD = "reward"
     CONFIRMATION = "confirmation"
     FOOD_SELECTION = "food_selection"
+    PROMO = "promo"
     UNKNOWN = "unknown"
 
 

@@ -182,6 +182,65 @@ def detect_family_task_controls(content: bytes) -> dict[str, tuple[int, int, flo
     return result
 
 
+def detect_modal_scrim(content: bytes) -> tuple[int, int, float] | None:
+    """Detect a Canvas-drawn modal: dimmed page, raised card, bottom-centre X.
+
+    Alipay activity promos (forest anniversary skins, game-centre cash popups,
+    the kitchen recipe card) render as one image, so the accessibility tree
+    cannot see them and taps on the page underneath are swallowed by the scrim.
+    The shared real-device signature is a dimmed frame, a brighter centre, and
+    one compact X blob on the vertical centreline below the card, sitting on
+    dark scrim.  Returns the X control centre so the overlay can be dismissed
+    without coordinate guessing, or ``None`` when the signature does not match.
+    """
+    image = decode_png(content)
+    height, width = image.shape[:2]
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    card = gray[int(height * 0.27) : int(height * 0.67), int(width * 0.14) : int(width * 0.86)]
+    corners = np.concatenate(
+        (
+            gray[: int(height * 0.12), : int(width * 0.18)].ravel(),
+            gray[: int(height * 0.12), int(width * 0.82) :].ravel(),
+        )
+    )
+    if not (card.size and corners.size):
+        return None
+    if np.mean(corners) >= 95 or np.mean(card) <= np.mean(corners) + 40:
+        return None
+    band = gray[int(height * 0.70) : int(height * 0.92), int(width * 0.44) : int(width * 0.56)]
+    if not band.size:
+        return None
+    _, thresholded = cv2.threshold(band, 110, 255, cv2.THRESH_BINARY)
+    count, _, stats, centers = cv2.connectedComponentsWithStats(thresholded)
+    candidates = [
+        ((x, y), (left, top, box_width, box_height, area))
+        for (left, top, box_width, box_height, area), (x, y) in zip(
+            stats[1:count], centers[1:count], strict=True
+        )
+        # The X is compact; large page controls and full-width text lines do
+        # not fit this box, and neither do tiny texture specks.
+        if 30 <= box_width <= 200
+        and 30 <= box_height <= 200
+        and area >= 600
+    ]
+    if not candidates:
+        return None
+    # The X sits below every other central element (pagination dots, notice
+    # text), so take the southernmost candidate.
+    (x, y), (left, top, box_width, box_height, _area) = max(
+        candidates, key=lambda item: item[0][1]
+    )
+    surround = band[
+        max(0, top - 30) : top + box_height + 30,
+        max(0, left - 30) : left + box_width + 30,
+    ]
+    if float(np.mean(surround)) >= 95:
+        return None
+    absolute_x = int(width * 0.44) + round(x)
+    absolute_y = int(height * 0.70) + round(y)
+    return absolute_x, absolute_y, 0.90
+
+
 def detect_chicken_kitchen_controls(
     content: bytes,
 ) -> dict[str, tuple[int, int, float]] | None:
@@ -212,31 +271,30 @@ def detect_chicken_kitchen_controls(
         ):
             cook_candidates.append((int(area), (round(x), round(y))))
 
+    # The recipe card is a different modal family: its X floats over the light
+    # kitchen bottom panel instead of a dark scrim, so it keeps the narrow
+    # close-region signature that was calibrated on the real page.
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    card = gray[int(height * 0.27) : int(height * 0.67), int(width * 0.14) : int(width * 0.86)]
-    corners = np.concatenate(
-        (
-            gray[: int(height * 0.12), : int(width * 0.18)].ravel(),
-            gray[: int(height * 0.12), int(width * 0.82) :].ravel(),
-        )
-    )
     close_region = gray[
         int(height * 0.80) : int(height * 0.88),
         int(width * 0.43) : int(width * 0.57),
     ]
-    recipe_open = bool(
-        card.size
-        and corners.size
-        and close_region.size
-        and np.mean(card) > 135
-        and np.mean(corners) < 95
-        # The recipe card has a white outlined X over the dark scrim at the
-        # bottom centre. Bright feed-task cards can satisfy the two broad
-        # brightness checks above, but do not contain this dark close region.
+    scrim = None
+    if (
+        close_region.size
         and np.mean(close_region > 225) > 0.03
         and np.mean(close_region < 70) > 0.30
-    )
-    if not cook_candidates and not recipe_open:
+    ):
+        bright_rows, bright_columns = np.nonzero(close_region > 225)
+        if bright_rows.size:
+            scrim = (
+                int(width * 0.43) + round(float(bright_columns.mean())),
+                int(height * 0.80) + round(float(bright_rows.mean())),
+                0.90,
+            )
+        else:
+            scrim = (round(width * 0.50), round(height * 0.84), 0.90)
+    if not cook_candidates and scrim is None:
         return None
 
     result: dict[str, tuple[int, int, float]] = {
@@ -279,8 +337,8 @@ def detect_chicken_kitchen_controls(
     if daily_candidates:
         point = max(daily_candidates)[1]
         result["daily_ingredient"] = (*point, 0.86)
-    if recipe_open:
-        result = {"close": (round(width * 0.50), round(height * 0.84), 0.90)}
+    if scrim is not None:
+        result = {"close": scrim}
     return result
 
 
