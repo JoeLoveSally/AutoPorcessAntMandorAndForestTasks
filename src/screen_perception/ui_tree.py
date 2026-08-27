@@ -64,7 +64,7 @@ class UiTree:
             for node in self.nodes
             if any(fragment in node.searchable_text for fragment in fragments)
         ]
-        return _prefer_visible(matches)
+        return _prefer_visible(matches, fragments)
 
     def find_all_fragment(self, *fragments: str) -> list[UiNode]:
         return [node for node in self.nodes if any(fragment in node.searchable_text for fragment in fragments)]
@@ -129,9 +129,26 @@ def _walk(nodes: list[UiNode]):
         yield from _walk(node.children)
 
 
-def _prefer_visible(nodes: list[UiNode]) -> UiNode | None:
+def _prefer_visible(nodes: list[UiNode], fragments: tuple[str, ...] = ()) -> UiNode | None:
     """Prefer the rendered copy when a WebView keeps hidden DOM nodes alive."""
-    return next((node for node in nodes if node.bounds.valid), nodes[0] if nodes else None)
+    candidates = [node for node in nodes if node.bounds.valid] or nodes
+    if not candidates or not fragments:
+        return candidates[0] if candidates else None
+    wanted = {fragment.strip() for fragment in fragments}
+
+    def rank(node: UiNode) -> tuple[int, int]:
+        exact = node.text.strip() in wanted or node.description.strip() in wanted
+        action = node.action_node
+        area = (action.bounds.right - action.bounds.left) * (
+            action.bounds.bottom - action.bounds.top
+        )
+        # An exact label beats a fragment match inside promotional copy, and a
+        # small tappable target beats a full-width banner: the alipay home
+        # banner desc 来参加蚂蚁森林十周年啦 contains 蚂蚁森林, and tapping its
+        # bounds opens the campaign instead of the forest.
+        return (0 if exact else 1, area)
+
+    return sorted(candidates, key=rank)[0]
 
 
 def _parse_node(item: ET.Element, parent: UiNode | None) -> UiNode:

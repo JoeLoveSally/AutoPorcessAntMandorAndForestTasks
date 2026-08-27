@@ -271,3 +271,25 @@ def test_promo_scrim_ignored_without_screenshot():
     page = ScreenDetector().detect(make_observation(forest_home_xml()))
     assert page.page is Page.FOREST_HOME
     assert page.overlays == ()
+
+
+def test_activity_banner_does_not_steal_the_forest_entry():
+    # Real-device layout (run 20260827-035935): a full-width campaign banner
+    # whose content-desc contains 蚂蚁森林 sits above the app grid; the entry
+    # tap must bind to the icon label, not the banner.
+    shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
+      <node text='' content-desc='来参加蚂蚁森林十周年啦' resource-id='' class='FrameLayout' clickable='true' enabled='true' bounds='[0,344][1440,1104]' />
+      <node text='蚂蚁庄园' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[1177,1300][1373,1353]' />
+      <node text='蚂蚁森林' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[343,1564][539,1617]' />
+      <node text='' content-desc='消息盒子 蚂蚁森林 能量过期 蚂蚁庄园 饲料待领取' resource-id='' class='FrameLayout' clickable='true' enabled='true' bounds='[32,2121][1408,2567]' />
+      <node text='蚂蚁森林' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[160,2269][360,2345]' />
+    </hierarchy>"""
+    page = ScreenDetector().detect(make_observation(shaped))
+
+    assert page.page is Page.ALIPAY_HOME
+    forest = page.element("forest")
+    manor = page.element("manor")
+    assert forest.center == (441, 1590)
+    assert forest.bounds == Bounds(343, 1564, 539, 1617)
+    # The message-box sender label must not win over the app icon either.
+    assert manor.center == (1275, 1326)
