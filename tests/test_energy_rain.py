@@ -3,7 +3,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from workflow.forest.energy_rain import _balls, _is_game_frame
+from workflow.forest.energy_rain import Track, _balls, _is_game_frame
 
 
 def test_stale_unanswered_tracks_are_safe_to_reclaim():
@@ -11,6 +11,13 @@ def test_stale_unanswered_tracks_are_safe_to_reclaim():
     # disappeared before any tap must not be allowed to match future targets.
     # The loop uses a 300 ms TTL, shorter than a typical rain target lifetime.
     assert 0.30 < 0.45
+
+
+def test_track_predicts_falling_motion_at_touch_latency():
+    track = Track(1, 100, 200, 1.0)
+    track.update(102, 220, 1.05)
+
+    assert track.predicted(0.08, 1600) == (105, 252)
 
 
 def test_game_frame_requires_large_blue_sky_board():

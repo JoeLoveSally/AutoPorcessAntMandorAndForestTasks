@@ -24,6 +24,7 @@ class Track:
     tapped_at: float | None = None
     confirmed: bool = False
     missed_frames_after_tap: int = 0
+    retired: bool = False
 
     def update(self, x: float, y: float, now: float) -> None:
         self.previous_x = self.x
@@ -110,6 +111,7 @@ class EnergyRainPlayer:
                         del tracks[key]
                 unmatched = set(tracks)
                 for x, y in detections:
+                    unmatched = {key for key in unmatched if not tracks[key].retired}
                     candidate = min(
                         unmatched,
                         key=lambda key: math.dist(
@@ -139,8 +141,11 @@ class EnergyRainPlayer:
                     else:
                         tracks[next_id] = Track(next_id, x, y, frame.captured_at)
                         next_id += 1
+                eligible: list[tuple[int, Track, tuple[int, int]]] = []
                 for track in tracks.values():
                     if track.tapped_at is not None:
+                        if frame.captured_at - track.tapped_at > 0.45:
+                            track.retired = True
                         if track.last_seen < frame.captured_at:
                             track.missed_frames_after_tap += 1
                         else:
@@ -161,6 +166,12 @@ class EnergyRainPlayer:
                     local = track.predicted(0.08, frame.image.shape[0])
                     if local[1] >= frame.image.shape[0] * 0.86:
                         continue
+                    eligible.append((local[1], track, local))
+                # ``input tap`` commands execute serially on Android. Sending
+                # every object from one frame builds a stale coordinate queue;
+                # send only the two lowest (most urgent) balls, then recompute
+                # the rest from the next video frame.
+                for _urgency, track, local in sorted(eligible, reverse=True)[:2]:
                     touch.tap(frame.to_device(local))
                     track.tapped_at = time.monotonic()
                     taps += 1
