@@ -5,6 +5,7 @@ from conftest import make_observation
 from device_bridge.common import Size
 from domain_data import Bounds, DetectedScreen, Element, Page, StepStatus
 from workflow.forest.daily import ForestWorkflow
+from workflow.forest.energy_rain import EnergyRainStats
 
 
 class StubSession:
@@ -165,3 +166,57 @@ def test_find_energy_staying_home_means_no_friends_available():
     assert result is home
     assert session.steps[-1][1] is StepStatus.ALREADY_DONE
     assert "no friends available" in session.steps[-1][2]
+
+
+def test_energy_rain_result_page_is_authoritative_over_estimated_hit_rate():
+    observation = make_observation("<?xml version='1.0'?><hierarchy rotation='0' />")
+    forest = DetectedScreen(
+        Page.FOREST_HOME,
+        observation,
+        {"energy_rain": Element("energy_rain", Bounds(1, 1, 10, 10), observation.id)},
+    )
+    gift = DetectedScreen(
+        Page.ENERGY_RAIN_GIFT,
+        observation,
+        {"gift_first": Element("gift_first", Bounds(1, 1, 10, 10), observation.id)},
+    )
+    rain = DetectedScreen(
+        Page.ENERGY_RAIN,
+        observation,
+        {"start": Element("start", Bounds(1, 1, 10, 10), observation.id)},
+    )
+    result = DetectedScreen(Page.ENERGY_RAIN_RESULT, observation)
+
+    class RainSession:
+        def __init__(self):
+            self.config = SimpleNamespace(
+                realtime=SimpleNamespace(minimum_hit_rate=0.80),
+                runtime=SimpleNamespace(),
+            )
+            self.device = SimpleNamespace()
+            self.logger = SimpleNamespace(emit=lambda *_args, **_kwargs: None)
+            self.taps = []
+            self.waits = 0
+
+        def tap(self, _screen, key, _name, expected=(), **_kwargs):
+            self.taps.append(key)
+            return rain if key == "energy_rain" else rain
+
+        def wait_for(self, pages, _reason, **_kwargs):
+            self.waits += 1
+            return gift if self.waits == 1 else result
+
+        def back(self, _screen, _name, _expected):
+            return forest
+
+        def add_step(self, *_args):
+            pass
+
+    workflow = object.__new__(ForestWorkflow)
+    workflow.session = RainSession()
+    workflow._locate_carousel = lambda current, _key: current
+    workflow.rain = SimpleNamespace(
+        play=lambda *_args: EnergyRainStats(10, 1, 1, 0, 0.10, 1.0, 16.0)
+    )
+
+    assert workflow._energy_rain(forest) is forest

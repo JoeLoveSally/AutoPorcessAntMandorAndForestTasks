@@ -251,9 +251,15 @@ class ForestWorkflow:
                 timeout=8,
             )
             if stats.hit_rate < self.session.config.realtime.minimum_hit_rate:
-                raise AutomationError(
-                    f"Energy rain hit rate {stats.hit_rate:.1%} is below "
-                    f"{self.session.config.realtime.minimum_hit_rate:.1%}"
+                # Hit confirmation is only an estimate: a ball can disappear
+                # between video frames even when the touch lands. The result
+                # page is the authoritative completion signal, so keep this
+                # as diagnostics instead of failing after a completed round.
+                self.session.logger.emit(
+                    "energy_rain.low_estimated_hit_rate",
+                    round=round_number,
+                    hit_rate=round(stats.hit_rate, 4),
+                    threshold=self.session.config.realtime.minimum_hit_rate,
                 )
             if round_number == 1:
                 if result.page is not Page.ENERGY_RAIN_GIFT or not result.element("gift_first"):
