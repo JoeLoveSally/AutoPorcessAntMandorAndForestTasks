@@ -164,6 +164,28 @@ class WorkflowSession:
         result, after = self._tap_raw(screen, key, name, expected, required_after)
         if result.status is ActionStatus.EXECUTED and after is not None:
             return after
+        # A popup dismissal or WebView redraw can invalidate the source
+        # observation without sending the requested tap. Re-scan the same
+        # page a couple of times so a recovered element is not treated as a
+        # hard failure. Since point is None, this cannot repeat a tap already
+        # delivered to the device.
+        if (
+            not self._recovering
+            and expected
+            and result.status is ActionStatus.REJECTED
+            and result.point is None
+            and result.error
+            and "Element not found" in result.error
+        ):
+            for attempt in range(1, 3):
+                time.sleep(self.config.runtime.poll_interval_seconds)
+                refreshed = self.observe(f"{name}-refresh-{attempt}")
+                if refreshed.page is not screen.page or refreshed.element(key) is None:
+                    continue
+                result, after = self._tap_raw(refreshed, key, name, expected, required_after)
+                if result.status is ActionStatus.EXECUTED and after is not None:
+                    return after
+                break
         # Retry only when nothing was sent to the device (point is None) and we
         # know the target page. Recover the source page before looking up and
         # tapping the source element again; ``expected`` describes the page
