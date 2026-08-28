@@ -20,7 +20,17 @@ from screen_perception.vision import (
 # The 10th-anniversary campaign family (watering page, certificate story,
 # retrospective) shows 蚂蚁森林 and lottery markers inside its Canvas, so both
 # the forest-home and lottery rules must exclude it explicitly.
-_CAMPAIGN_MARKERS = ("上滑种树", "浇水加入", "十年之约", "去种下", "我们的十年", "限定保护罩")
+_CAMPAIGN_MARKERS = (
+    "上滑种树",
+    "浇水加入",
+    "十年之约",
+    "蚂蚁森林10周年",
+    "10周年种树",
+    "去种下",
+    "我们的十年",
+    "限定保护罩",
+)
+
 
 class ScreenDetector:
     def __init__(
@@ -444,6 +454,19 @@ class ScreenDetector:
         if tree is None:
             return None
         joined = " ".join(labels)
+        # When no collectible friend remains, 找能量 can route to an Alipay
+        # membership task page.  It still contains 蚂蚁森林 and green Canvas
+        # decorations, but is not the forest home.  Keep it UNKNOWN so the
+        # workflow's post-condition recovery backs out to the real home page.
+        if _visible(tree, "支付宝会员签到") and _has(
+            joined, "养绿植得能量", "找能量共获得"
+        ):
+            return DetectedScreen(
+                Page.UNKNOWN,
+                observation,
+                overlays=overlays,
+                evidence=("ui:支付宝会员签到", "not:forest_home"),
+            )
         if _has(joined, "我的活力值") and _visible(tree, "关闭奖励弹窗"):
             return self._screen(Page.FOREST_SIGN_REWARD, observation, tree, overlays, {
                 "close_reward": ("关闭奖励弹窗",),
@@ -456,6 +479,14 @@ class ScreenDetector:
         if _visible(tree, "为爱攒能量"):
             return self._screen(Page.FOREST_LOVE_PLANT, observation, tree, overlays, {
                 "water": ("为爱攒能量", "攒能量"), "plus": ("+",), "confirm": ("攒能量",),
+            })
+        # The amount selector is a modal over the love-plant Canvas.  Its
+        # background still exposes the forest title, so the generic home rule
+        # would otherwise win once the Canvas button is replaced by the modal.
+        # Require the modal-specific copy before binding the exact controls.
+        if _visible(tree, "你当前有", "喊TA来攒") and _visible(tree, "攒能量"):
+            return self._screen(Page.FOREST_LOVE_PLANT, observation, tree, overlays, {
+                "water": ("攒能量",), "plus": ("+",), "confirm": ("攒能量",),
             })
         # The love-plant page renders 为爱攒能量 as Canvas; only 真爱合种 and
         # calendar fragments reach the tree. Do not bind water from tree text:
@@ -488,10 +519,16 @@ class ScreenDetector:
         if _visible(tree, "森林市集", "抽奖机会") and _visible(tree, "立即抽奖", "签到"):
             return self._lottery(Page.FOREST_LOTTERY, observation, tree, overlays)
         if _visible(tree, "TA待收的能量", "一键收"):
-            elements = self._elements(observation, tree, {"one_click": ("一键收",)})
-            if "one_click" not in elements and observation.screenshot:
+            # Friend WebViews retain the preceding friend's hidden 一键收 node
+            # after a swipe. Bind the action only when the bright yellow
+            # right-edge button is present in the current screenshot. A gift
+            # bubble elsewhere on the tree is intentionally ignored.
+            elements: dict[str, Element] = {}
+            if observation.screenshot:
                 if point := detect_yellow_right_button(observation.screenshot):
-                    elements["one_click"] = _point_element(observation, "one_click", point, "cv:yellow_right")
+                    elements["one_click"] = _point_element(
+                        observation, "one_click", point, "cv:yellow_right"
+                    )
             return DetectedScreen(Page.FOREST_FRIEND, observation, elements, overlays, ("friend_energy_marker",), 0.90)
         # The 10th-anniversary campaign page is a full-screen Canvas whose tree
         # also contains 蚂蚁森林 (浇水给蚂蚁森林十年之约林); without this guard

@@ -110,3 +110,10 @@ def test_yellow_right_button_ignores_lawn_and_ground_strip():
     assert point is not None
     assert abs(point[0] - 1257) <= 4
     assert abs(point[1] - 1870) <= 4
+
+
+def test_yellow_right_button_ignores_narrow_right_rail_control():
+    image = np.zeros((3200, 1440, 3), dtype=np.uint8)
+    cv2.rectangle(image, (1194, 1571), (1405, 1703), (30, 200, 250), -1)
+
+    assert detect_yellow_right_button(encode(image)) is None

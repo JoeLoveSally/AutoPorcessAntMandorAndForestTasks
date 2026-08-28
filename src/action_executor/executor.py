@@ -96,10 +96,27 @@ class ActionExecutor:
                 )
                 after = self.detector.detect(observation)
                 if expected_pages and after.page not in expected_pages:
-                    raise SafetyStop(
-                        f"Postcondition page mismatch after {action.name}: "
-                        f"expected {[item.value for item in expected_pages]}, got {after.page.value}"
-                    )
+                    # WebView transitions can leave the old page rendered for
+                    # one or two frames after a tap (notably the forest sign
+                    # reward and Canvas modals).  Give the expected page a
+                    # short, bounded confirmation window before treating the
+                    # action as rejected; this avoids unnecessary retries
+                    # while keeping the action atomic.
+                    for confirmation in range(2):
+                        time.sleep(self.settle_seconds)
+                        observation = self.collector.capture(
+                            self.artifacts_directory,
+                            f"after-{action.name}-confirm-{confirmation + 1}",
+                            ObservationMode.FULL,
+                        )
+                        after = self.detector.detect(observation)
+                        if after.page in expected_pages:
+                            break
+                    if after.page not in expected_pages:
+                        raise SafetyStop(
+                            f"Postcondition page mismatch after {action.name}: "
+                            f"expected {[item.value for item in expected_pages]}, got {after.page.value}"
+                        )
                 if postcondition is not None and not postcondition(after):
                     raise SafetyStop(f"Postcondition failed after {action.name}")
             result = ActionResult(
@@ -149,7 +166,13 @@ class ActionExecutor:
             raise SafetyStop("Refusing action on unknown page")
         if screen.observation.package != self.package:
             raise SafetyStop(f"Foreground package is not Alipay: {screen.observation.package}")
-        if any(error.startswith("unstable_observation") for error in screen.observation.errors):
+        unstable = any(
+            error.startswith("unstable_observation") for error in screen.observation.errors
+        )
+        safe_friend_advance = (
+            screen.page is Page.FOREST_FRIEND and action.kind is ActionKind.SWIPE
+        )
+        if unstable and not safe_friend_advance:
             raise SafetyStop("Observation changed while it was captured")
         package, _ = self.device.current_package_activity()
         if package != self.package:

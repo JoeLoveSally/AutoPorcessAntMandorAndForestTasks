@@ -98,7 +98,10 @@ def detect_yellow_right_button(content: bytes) -> tuple[int, int] | None:
             continue
         if not height * 0.45 < center[1] < height * 0.80:
             continue
-        if item_width < width * 0.12 or item_height < height * 0.025:
+        # 一键收 is a wide horizontal pill (about 25% of the screen on the
+        # calibration phone). Narrow yellow/orange right-rail controls such as
+        # 用道具 and 浇水 must not qualify.
+        if item_width < width * 0.20 or item_height < height * 0.025:
             continue
         candidates.append((int(area), center))
     return max(candidates, default=(0, None))[1]

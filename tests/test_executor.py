@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from conftest import make_observation
 
 from action_executor import ActionExecutor
@@ -20,6 +22,7 @@ from domain_data import (
 class _Device:
     def __init__(self):
         self.taps: list[tuple[int, int]] = []
+        self.swipes: list[tuple[tuple[int, int], tuple[int, int], int]] = []
 
     def size(self):
         return Size(1440, 3200)
@@ -30,23 +33,32 @@ class _Device:
     def back(self):
         self.backs = getattr(self, "backs", []) + [True]
 
+    def swipe(self, start, end, duration_ms):
+        self.swipes.append((start, end, duration_ms))
+
     def current_package_activity(self):
         return "com.eg.android.AlipayGphone", "Activity"
 
 
 class _Collector:
-    def __init__(self, screen: DetectedScreen):
+    def __init__(self, screen: DetectedScreen, sequence=None):
         self.screen = screen
+        self.sequence = list(sequence or ())
 
     def capture(self, *_args, **_kwargs):
+        if self.sequence:
+            return self.sequence.pop(0).observation
         return self.screen.observation
 
 
 class _Detector:
-    def __init__(self, screen: DetectedScreen):
+    def __init__(self, screen: DetectedScreen, sequence=None):
         self.screen = screen
+        self.sequence = list(sequence or ())
 
     def detect(self, _observation):
+        if self.sequence:
+            return self.sequence.pop(0)
         return self.screen
 
 
@@ -92,6 +104,30 @@ def _executor(screen: DetectedScreen, after: DetectedScreen) -> ActionExecutor:
         "com.eg.android.AlipayGphone",
         settle_seconds=0.0,
     )
+
+
+def test_expected_page_gets_short_confirmation_window():
+    screen, after = _screen(())
+    stale = DetectedScreen(Page.FOREST_HOME, _observation())
+    expected = DetectedScreen(Page.FOREST_LOVE_PLANT, _observation())
+    executor = ActionExecutor(
+        _Device(),
+        _Collector(after),
+        _Detector(after, [stale, expected]),
+        _Logger(),
+        None,
+        "com.eg.android.AlipayGphone",
+        settle_seconds=0.0,
+    )
+
+    result, observed = executor.execute(
+        screen,
+        Action("open-love-plant", ActionKind.TAP, "love_plant"),
+        expected_pages=(Page.FOREST_LOVE_PLANT,),
+    )
+
+    assert result.status is ActionStatus.EXECUTED
+    assert observed is expected
 
 
 def _promo_overlay() -> Overlay:
@@ -155,3 +191,28 @@ def test_back_is_allowed_on_unknown_pages():
 
     assert result.status is ActionStatus.EXECUTED
     assert observed is after
+
+
+def test_animated_friend_page_allows_only_safe_advance_swipe():
+    observation = replace(
+        _observation(),
+        errors=("unstable_observation:page changed during capture",),
+    )
+    friend = DetectedScreen(Page.FOREST_FRIEND, observation)
+    after = DetectedScreen(Page.FOREST_FRIEND, _observation())
+    executor = _executor(friend, after)
+
+    result, observed = executor.execute(
+        friend,
+        Action(
+            "forest-next-friend",
+            ActionKind.SWIPE,
+            start=(720, 2432),
+            end=(720, 960),
+            duration_ms=450,
+        ),
+    )
+
+    assert result.status is ActionStatus.EXECUTED
+    assert observed is after
+    assert executor.device.swipes == [((720, 2432), (720, 960), 450)]

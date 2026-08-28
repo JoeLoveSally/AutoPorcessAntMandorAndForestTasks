@@ -101,22 +101,37 @@ class ForestWorkflow:
             forest,
             "find_energy",
             "forest-find-energy",
-            (Page.FOREST_FRIEND, Page.FOREST_TREASURE),
+            (Page.FOREST_FRIEND, Page.FOREST_TREASURE, Page.FOREST_HOME),
         )
+        if current.page is Page.FOREST_HOME:
+            self.session.add_step(
+                "forest.collect_friend_energy",
+                StepStatus.ALREADY_DONE,
+                "find-energy stayed on home; no friends available",
+            )
+            return current
         friends = 0
         size = self.session.device.size()
         for index in range(self.session.config.runtime.max_task_iterations):
-            if current.page is Page.FOREST_TREASURE:
+            if current.page in (Page.FOREST_TREASURE, Page.FOREST_HOME):
                 break
-            if current.page is not Page.FOREST_FRIEND or not current.element("one_click"):
-                raise AutomationError(f"Friend page {index + 1} has no one-click collection")
-            current = self.session.tap(
-                current,
-                "one_click",
-                f"forest-friend-one-click-{index + 1}",
-                (Page.FOREST_FRIEND,),
+            if current.page is not Page.FOREST_FRIEND:
+                raise AutomationError(f"Friend page {index + 1} left the friend list")
+            stable = not any(
+                error.startswith("unstable_observation")
+                for error in current.observation.errors
             )
-            friends += 1
+            if stable and current.element("one_click"):
+                current = self.session.tap(
+                    current,
+                    "one_click",
+                    f"forest-friend-one-click-{friends + 1}",
+                    (Page.FOREST_FRIEND,),
+                )
+                friends += 1
+            # No visible one-click button (for example, only a gift bubble),
+            # or an animated/incoherent observation: do not guess a target;
+            # advance directly to the next friend.
             current = self.session.swipe(
                 current,
                 f"forest-next-friend-{index + 1}",
@@ -124,18 +139,25 @@ class ForestWorkflow:
                 (size.width // 2, int(size.height * 0.30)),
                 450,
             )
-            if current.page not in (Page.FOREST_FRIEND, Page.FOREST_TREASURE):
+            if current.page not in (
+                Page.FOREST_FRIEND,
+                Page.FOREST_TREASURE,
+                Page.FOREST_HOME,
+            ):
                 current = self.session.wait_for(
-                    (Page.FOREST_FRIEND, Page.FOREST_TREASURE),
+                    (Page.FOREST_FRIEND, Page.FOREST_TREASURE, Page.FOREST_HOME),
                     f"forest-friend-settle-{index + 1}",
                 )
         else:
             raise AutomationError("Friend energy loop reached its iteration budget")
-        current = self._forest_lotteries(current)
+        lotteries = current.page is Page.FOREST_TREASURE
+        if lotteries:
+            current = self._forest_lotteries(current)
         self.session.add_step(
             "forest.collect_friend_energy",
             StepStatus.SUCCESS,
-            f"visited {friends} friends and completed lotteries",
+            f"collected from {friends} friends; "
+            + ("completed lotteries" if lotteries else "treasure unavailable"),
         )
         return current
 

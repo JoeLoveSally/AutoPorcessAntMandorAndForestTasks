@@ -56,6 +56,25 @@ def test_forest_home_card_does_not_look_like_energy_rain_start_page():
     assert page.page is Page.FOREST_HOME
 
 
+def test_membership_plant_task_is_not_forest_home():
+    # Real-device dump (run 20260827-084827): 找能量 routed here after all
+    # collectible friends were exhausted.  The page still exposes 蚂蚁森林 and
+    # must be rejected so post-condition recovery can return to forest home.
+    page = ScreenDetector().detect(
+        make_observation(
+            xml(
+                "蚂蚁森林",
+                "支付宝会员签到",
+                "养绿植得能量",
+                "找能量共获得 137g 今日共获得289g",
+            )
+        )
+    )
+
+    assert page.page is Page.UNKNOWN
+    assert "ui:支付宝会员签到" in page.evidence
+
+
 def test_forest_sign_reward_overlay_wins_over_underlying_home():
     page = ScreenDetector().detect(
         make_observation(xml("蚂蚁森林", "我的活力值", "关闭奖励弹窗", "立即领取"))
@@ -316,6 +335,34 @@ def test_love_plant_canvas_page_binds_water_from_vision_not_tree_fragments():
     assert page.element("water").source == "cv_layout:love_plant_water"
 
 
+def test_love_plant_amount_modal_is_not_misclassified_as_forest_home():
+    page = ScreenDetector().detect(
+        make_observation(
+            xml("蚂蚁森林", "真爱合种", "你当前有21871g", "喊TA来攒", "攒能量", "+")
+        )
+    )
+    assert page.page is Page.FOREST_LOVE_PLANT
+    assert page.element("plus") is not None
+    assert page.element("confirm") is not None
+
+
+def test_friend_hidden_one_click_node_is_ignored_without_visual_button():
+    shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
+      <node text='蚂蚁森林' content-desc='' resource-id='' class='WebView' clickable='false' enabled='true' bounds='[0,0][1440,3200]' />
+      <node text='TA待收的能量' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[40,340][620,470]' />
+      <node text='一键收' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[1075,1800][1440,1940]' />
+    </hierarchy>"""
+    image = np.zeros((3200, 1440, 3), dtype=np.uint8)
+    cv2.rectangle(image, (260, 560), (450, 760), (20, 80, 240), -1)  # gift bubble
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+
+    page = ScreenDetector().detect(make_observation(shaped, screenshot=encoded.tobytes()))
+
+    assert page.page is Page.FOREST_FRIEND
+    assert page.element("one_click") is None
+
+
 def test_anniversary_campaign_is_not_the_forest_home_or_a_lottery():
     # Real-device dump (run 20260827-052152): the full-screen 10th-anniversary
     # campaign also contains 蚂蚁森林 and 活动剩余时间 in its tree; without the
@@ -326,6 +373,19 @@ def test_anniversary_campaign_is_not_the_forest_home_or_a_lottery():
       <node text='浇水加入' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[200,2570][1240,2760]' />
       <node text='上滑种树得「10周年限定证书」' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[250,3080][1190,3160]' />
       <node text='活动剩余时间 06天11时59分51秒' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[360,1440][1080,1500]' />
+      <node text='蚂蚁森林10周年' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[360,420][1080,520]' />
     </hierarchy>"""
     page = ScreenDetector().detect(make_observation(shaped))
+    assert page.page is Page.UNKNOWN
+
+
+def test_anniversary_certificate_page_is_not_forest_home():
+    shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
+      <node text='蚂蚁森林' content-desc='' resource-id='' class='WebView' clickable='false' enabled='true' bounds='[0,0][1440,3200]' />
+      <node text='10周年种树' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[80,170][480,280]' />
+      <node text='能量雨' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[500,2700][900,2800]' />
+    </hierarchy>"""
+
+    page = ScreenDetector().detect(make_observation(shaped))
+
     assert page.page is Page.UNKNOWN
