@@ -22,6 +22,7 @@ class Track:
     previous_seen: float | None = None
     tapped_at: float | None = None
     confirmed: bool = False
+    missed_frames_after_tap: int = 0
 
     def update(self, x: float, y: float, now: float) -> None:
         self.previous_y = self.y
@@ -82,11 +83,14 @@ class EnergyRainPlayer:
             deadline = started + self.config.realtime.rain_duration_seconds
             active_after = started + 2.6
             last_targets = active_after
+            game_seen = False
             while time.monotonic() < deadline:
                 frame = stream.next_frame(timeout=3)
                 frames += 1
                 frame_times.append(frame.captured_at)
-                detections = _balls(frame.image) if frame.captured_at >= active_after else []
+                game_frame = frame.captured_at >= active_after and _is_game_frame(frame.image)
+                game_seen = game_seen or game_frame
+                detections = _balls(frame.image) if game_frame else []
                 if detections:
                     last_targets = frame.captured_at
                 unmatched = set(tracks)
@@ -106,10 +110,22 @@ class EnergyRainPlayer:
                         next_id += 1
                 for track in tracks.values():
                     if track.tapped_at is not None:
-                        if frame.captured_at - track.tapped_at <= 0.45 and track.last_seen < frame.captured_at:
+                        if track.last_seen < frame.captured_at:
+                            track.missed_frames_after_tap += 1
+                        else:
+                            track.missed_frames_after_tap = 0
+                        if (
+                            frame.captured_at - track.tapped_at <= 0.45
+                            and track.missed_frames_after_tap >= 2
+                        ):
                             track.confirmed = True
                         continue
                     if frame.captured_at - track.last_seen > 0.12:
+                        continue
+                    # A static green decoration can look circular too. Require
+                    # the same object to have moved down between two frames
+                    # before it is eligible for a tap.
+                    if track.previous_y is None or track.y <= track.previous_y + 1:
                         continue
                     local = track.predicted(0.08, frame.image.shape[0])
                     if local[1] >= frame.image.shape[0] * 0.86:
@@ -117,12 +133,9 @@ class EnergyRainPlayer:
                     touch.tap(frame.to_device(local))
                     track.tapped_at = time.monotonic()
                     taps += 1
-                if tracks and time.monotonic() - last_targets > 1.8 and time.monotonic() - started > 10:
+                if game_seen and tracks and time.monotonic() - last_targets > 1.8 and time.monotonic() - started > 10:
                     break
         now = time.monotonic()
-        for track in tracks.values():
-            if track.tapped_at is not None and now - track.last_seen > 0.12:
-                track.confirmed = True
         targeted = [track for track in tracks.values() if track.tapped_at is not None]
         hits = sum(track.confirmed for track in targeted)
         hit_rate = hits / len(targeted) if targeted else 0.0
@@ -169,3 +182,14 @@ def _balls(image: np.ndarray) -> list[tuple[int, int]]:
             continue
         points.append((round(x), round(y)))
     return sorted(points, key=lambda point: -point[1])
+
+
+def _is_game_frame(image: np.ndarray) -> bool:
+    """Require the blue-sky game board before detecting or tapping targets."""
+    height, width = image.shape[:2]
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    board = hsv[int(height * 0.15) : int(height * 0.75), :width]
+    if not board.size:
+        return False
+    blue = cv2.inRange(board, (85, 50, 90), (125, 255, 255))
+    return float(np.mean(blue > 0)) >= 0.35
