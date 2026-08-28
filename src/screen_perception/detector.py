@@ -592,9 +592,18 @@ class ScreenDetector:
 
     def _energy_rain(self, observation, tree, labels, overlays):
         joined = " ".join(labels)
-        if tree is not None and _visible(tree, "恭喜获得") and _has(
-            joined, "绿色能量", "能量雨机会"
+        if tree is not None and (
+            (_visible(tree, "恭喜获得") and _has(joined, "绿色能量", "能量雨机会"))
+            or (_visible(tree, "今日累计获取") and _has(joined, "绿色能量"))
         ):
+            # After the first round the result page offers a friend gift. It
+            # is a distinct workflow state: tapping the first gift unlocks
+            # the second round, while tapping the stale "立即开启" label would
+            # only reopen this same result page.
+            if _visible(tree, "送TA机会"):
+                return self._screen(Page.ENERGY_RAIN_GIFT, observation, tree, overlays, {
+                    "gift_first": ("送TA机会",), "close": ("返回",),
+                })
             return self._screen(Page.ENERGY_RAIN_RESULT, observation, tree, overlays, {
                 "close": ("返回",),
             })
