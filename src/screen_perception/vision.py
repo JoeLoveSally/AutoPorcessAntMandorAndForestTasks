@@ -228,9 +228,12 @@ def detect_modal_scrim(content: bytes) -> tuple[int, int, float] | None:
             stats[1:count], centers[1:count], strict=True
         )
         # The X is compact; large page controls and full-width text lines do
-        # not fit this box, and neither do tiny texture specks.
+        # not fit this box, and neither do tiny texture specks. Require a
+        # roughly square component so a horizontal task button cannot be
+        # mistaken for the modal close control.
         if 30 <= box_width <= 200
         and 30 <= box_height <= 200
+        and 0.65 <= box_width / box_height <= 1.5
         and area >= 600
     ]
     # The X sits below every other central element (pagination dots, notice

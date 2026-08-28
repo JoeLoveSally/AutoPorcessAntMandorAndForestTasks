@@ -25,7 +25,12 @@ class ManorWorkflow:
     def _home_tasks(self, manor: DetectedScreen) -> DetectedScreen:
         rewarded = 0
         while manor.element("reward_friend") and rewarded < 10:
-            manor = self.session.tap(manor, "reward_friend", f"manor-reward-friend-{rewarded + 1}")
+            manor = self.session.tap(
+                manor,
+                "reward_friend",
+                f"manor-reward-friend-{rewarded + 1}",
+                (Page.MANOR_HOME,),
+            )
             rewarded += 1
         self.session.add_step(
             "manor.reward_friends",

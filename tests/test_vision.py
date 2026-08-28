@@ -79,6 +79,13 @@ def test_modal_scrim_ignores_central_blob_on_bright_surround():
     assert detect_modal_scrim(encode(image)) is None
 
 
+def test_modal_scrim_ignores_horizontal_button_on_dark_page():
+    image = np.full((3200, 1440, 3), 28, dtype=np.uint8)
+    cv2.rectangle(image, (200, 860), (1240, 2150), (110, 150, 190), -1)
+    cv2.rectangle(image, (650, 2300), (850, 2360), (140, 140, 140), -1)
+    assert detect_modal_scrim(encode(image)) is None
+
+
 def test_love_plant_finds_centre_purple_pill():
     image = np.full((3200, 1440, 3), (240, 200, 250), dtype=np.uint8)
     cv2.ellipse(image, (720, 1599), (330, 92), 0, 0, 360, (205, 90, 180), -1)
