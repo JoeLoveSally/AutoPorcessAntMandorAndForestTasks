@@ -271,6 +271,14 @@ def test_promo_scrim_attaches_dismissible_overlay_to_covered_page():
     assert page.element("love_plant") is not None
 
 
+def test_manor_home_does_not_use_ambiguous_scrim_close_detection():
+    page = ScreenDetector().detect(
+        make_observation(xml("蚂蚁庄园", "家庭", "打赏"), screenshot=promo_screenshot())
+    )
+    assert page.page is Page.MANOR_HOME
+    assert page.overlays == ()
+
+
 def test_promo_scrim_skipped_when_page_has_its_own_modal_controls():
     shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
       <node text='丰收礼包' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[100,200][1300,300]' />

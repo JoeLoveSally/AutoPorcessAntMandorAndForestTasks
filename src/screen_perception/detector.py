@@ -100,6 +100,12 @@ class ScreenDetector:
             return result
         if any(key in overlay.elements for overlay in result.overlays for key in dismiss_keys):
             return result
+        # Manor home has several circular bottom-navigation controls in the
+        # same band as a Canvas promo close button. The generic scrim heuristic
+        # can mistake those controls for an X and navigate into a task page;
+        # rely on semantic manor overlays there instead.
+        if result.page is Page.MANOR_HOME:
+            return result
         scrim = detect_modal_scrim(observation.screenshot)
         if scrim is None:
             return result
