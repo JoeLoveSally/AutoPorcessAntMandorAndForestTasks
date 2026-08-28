@@ -166,6 +166,12 @@ class ScreenDetector:
         if tree is None:
             return None
         joined = " ".join(labels)
+        if _visible(tree, "捐蛋成功", "感谢你的爱心", "本次捐了") and _visible(
+            tree, "获取今日份幸运签", "完成", "关闭"
+        ):
+            return self._screen(Page.MANOR_DONATION_SUCCESS, observation, tree, overlays, {
+                "close": ("关闭", "完成"),
+            })
         # Chicken Kitchen and its donation shop are Canvas-only on current
         # Alipay builds: the UI tree contains one unlabelled Image node.  Use
         # the visual layout before text rules so the workflow can also observe
@@ -344,12 +350,6 @@ class ScreenDetector:
         if _has(joined, "贴贴小鸡", "明日再来"):
             return self._screen(Page.MANOR_DIARY, observation, tree, overlays, {
                 "attach": ("贴贴小鸡",), "diary_done": ("明日再来",), "close": ("关闭",),
-            })
-        if _visible(tree, "捐蛋成功", "感谢你的爱心", "本次捐了") and _visible(
-            tree, "获取今日份幸运签", "完成", "关闭"
-        ):
-            return self._screen(Page.MANOR_DONATION_SUCCESS, observation, tree, overlays, {
-                "close": ("关闭", "完成"),
             })
         if _visible(tree, "捐爱心蛋", "选择捐蛋数量") and _visible(tree, "立即捐蛋"):
             return self._screen(Page.MANOR_DONATION_CONFIRM, observation, tree, overlays, {
