@@ -38,5 +38,6 @@ def test_ball_detector_can_be_gated_away_from_green_start_page():
 
 def test_energy_rain_avoids_top_right_menu_but_allows_lower_targets():
     assert not _safe_tap_point((660, 150), 720, 1600)
-    assert _safe_tap_point((660, 310), 720, 1600)
+    assert not _safe_tap_point((625, 180), 720, 1600)
+    assert _safe_tap_point((660, 240), 720, 1600)
     assert _safe_tap_point((610, 150), 720, 1600)

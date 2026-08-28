@@ -183,7 +183,15 @@ class EnergyRainPlayer:
                 for _urgency, track, local in sorted(eligible, reverse=True)[:2]:
                     if not _safe_tap_point(local, frame.image.shape[1], frame.image.shape[0]):
                         continue
-                    touch.tap(frame.to_device(local))
+                    device_point = frame.to_device(local)
+                    touch.tap(device_point)
+                    self.logger.emit(
+                        "energy_rain.tap",
+                        frame=frame.sequence,
+                        track_id=track.id,
+                        local_point=local,
+                        device_point=device_point,
+                    )
                     track.tapped_at = time.monotonic()
                     taps += 1
                 if game_seen and tracks and time.monotonic() - last_targets > 1.8 and time.monotonic() - started > 10:
@@ -251,4 +259,6 @@ def _is_game_frame(image: np.ndarray) -> bool:
 def _safe_tap_point(point: tuple[int, int], width: int, height: int) -> bool:
     """Keep taps away from the persistent three-dot menu in the top-right."""
     x, y = point
-    return not (x >= width * 0.90 and y <= height * 0.18)
+    # The menu hit target is wider than the three visible dots. A ball that
+    # enters this strip is allowed to fall below it before being tapped.
+    return not (x >= width * 0.86 and y <= height * 0.14)
