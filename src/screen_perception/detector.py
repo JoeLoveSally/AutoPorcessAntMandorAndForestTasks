@@ -87,6 +87,14 @@ class ScreenDetector:
         """
         if not observation.screenshot:
             return result
+        # These pages deliberately present a dimmed, centred task modal whose
+        # semantic controls are already exposed by the accessibility tree.
+        # The generic scrim signature must not reclassify that normal modal as
+        # an advertisement and block its plus/confirm actions.
+        if result.page in (Page.FOREST_LOVE_PLANT, Page.FOREST_CO_PLANT) and any(
+            key in result.elements for key in ("plus", "confirm")
+        ):
+            return result
         dismiss_keys = ("close", "close_reward", "abandon_reward", "confirm_overflow")
         if any(key in result.elements for key in dismiss_keys):
             return result
@@ -584,9 +592,9 @@ class ScreenDetector:
 
     def _energy_rain(self, observation, tree, labels, overlays):
         joined = " ".join(labels)
-        if tree is not None and _visible(tree, "立即开始"):
+        if tree is not None and _visible(tree, "立即开始", "立即开启"):
             return self._screen(Page.ENERGY_RAIN, observation, tree, overlays, {
-                "start": ("立即开始",),
+                "start": ("立即开始", "立即开启"),
             })
         if tree is not None and _visible(tree, "本次获得", "能量雨结束"):
             return self._screen(Page.ENERGY_RAIN_RESULT, observation, tree, overlays, {

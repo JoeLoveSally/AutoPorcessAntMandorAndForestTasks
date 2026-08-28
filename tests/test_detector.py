@@ -346,6 +346,32 @@ def test_love_plant_amount_modal_is_not_misclassified_as_forest_home():
     assert page.element("confirm") is not None
 
 
+def test_love_plant_amount_modal_is_not_reclassified_as_promo():
+    image = np.full((3200, 1440, 3), 35, dtype=np.uint8)
+    cv2.rectangle(image, (180, 900), (1260, 2300), (235, 235, 235), -1)
+    cv2.circle(image, (720, 2600), 70, (245, 245, 245), 8)
+    cv2.line(image, (685, 2565), (755, 2635), (245, 245, 245), 12)
+    cv2.line(image, (755, 2565), (685, 2635), (245, 245, 245), 12)
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+
+    page = ScreenDetector().detect(
+        make_observation(
+            xml("蚂蚁森林", "真爱合种", "你当前有21871g", "喊TA来攒", "攒能量", "+"),
+            screenshot=encoded.tobytes(),
+        )
+    )
+
+    assert page.page is Page.FOREST_LOVE_PLANT
+    assert page.overlays == ()
+
+
+def test_energy_rain_accepts_immediately_open_copy():
+    page = ScreenDetector().detect(make_observation(xml("立即开启", "找更多能量")))
+    assert page.page is Page.ENERGY_RAIN
+    assert page.element("start") is not None
+
+
 def test_friend_hidden_one_click_node_is_ignored_without_visual_button():
     shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
       <node text='蚂蚁森林' content-desc='' resource-id='' class='WebView' clickable='false' enabled='true' bounds='[0,0][1440,3200]' />
