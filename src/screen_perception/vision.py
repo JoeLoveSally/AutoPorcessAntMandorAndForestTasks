@@ -133,7 +133,9 @@ def detect_manor_home_controls(content: bytes) -> dict[str, tuple[int, int, floa
         ):
             reward_candidates.append((int(area), (round(x), round(y))))
         if (
-            width * 0.55 < x < width * 0.85
+            # The diary sits above/right of the home chicken. The chicken's
+            # red comb is near the centre and must not qualify.
+            width * 0.65 < x < width * 0.88
             and height * 0.40 < y < height * 0.62
             and area > width * height * 0.0005
         ):
