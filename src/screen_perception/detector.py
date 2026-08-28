@@ -592,6 +592,12 @@ class ScreenDetector:
 
     def _energy_rain(self, observation, tree, labels, overlays):
         joined = " ".join(labels)
+        if tree is not None and _visible(tree, "恭喜获得") and _has(
+            joined, "绿色能量", "能量雨机会"
+        ):
+            return self._screen(Page.ENERGY_RAIN_RESULT, observation, tree, overlays, {
+                "close": ("返回",),
+            })
         if tree is not None and _visible(tree, "立即开始", "立即开启"):
             return self._screen(Page.ENERGY_RAIN, observation, tree, overlays, {
                 "start": ("立即开始", "立即开启"),

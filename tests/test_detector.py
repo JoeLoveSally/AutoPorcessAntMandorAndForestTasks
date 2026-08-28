@@ -372,6 +372,13 @@ def test_energy_rain_accepts_immediately_open_copy():
     assert page.element("start") is not None
 
 
+def test_energy_rain_result_accepts_congratulations_copy():
+    page = ScreenDetector().detect(
+        make_observation(xml("恭喜获得", "21g", "绿色能量", "【限时】再得1次能量雨机会", "返回"))
+    )
+    assert page.page is Page.ENERGY_RAIN_RESULT
+
+
 def test_friend_hidden_one_click_node_is_ignored_without_visual_button():
     shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
       <node text='蚂蚁森林' content-desc='' resource-id='' class='WebView' clickable='false' enabled='true' bounds='[0,0][1440,3200]' />

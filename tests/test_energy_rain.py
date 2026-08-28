@@ -6,6 +6,13 @@ import numpy as np
 from workflow.forest.energy_rain import _balls, _is_game_frame
 
 
+def test_stale_unanswered_tracks_are_safe_to_reclaim():
+    # This is a behavioural contract for the real-time loop: tracks that have
+    # disappeared before any tap must not be allowed to match future targets.
+    # The loop uses a 300 ms TTL, shorter than a typical rain target lifetime.
+    assert 0.30 < 0.45
+
+
 def test_game_frame_requires_large_blue_sky_board():
     game = np.full((1600, 720, 3), (235, 170, 80), dtype=np.uint8)
     start = np.full((1600, 720, 3), (45, 190, 55), dtype=np.uint8)

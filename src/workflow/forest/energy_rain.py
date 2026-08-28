@@ -19,12 +19,14 @@ class Track:
     y: float
     last_seen: float
     previous_y: float | None = None
+    previous_x: float | None = None
     previous_seen: float | None = None
     tapped_at: float | None = None
     confirmed: bool = False
     missed_frames_after_tap: int = 0
 
     def update(self, x: float, y: float, now: float) -> None:
+        self.previous_x = self.x
         self.previous_y = self.y
         self.previous_seen = self.last_seen
         self.x = x
@@ -32,12 +34,18 @@ class Track:
         self.last_seen = now
 
     def predicted(self, latency_seconds: float, height: int) -> tuple[int, int]:
-        velocity = 0.0
+        velocity_x = 0.0
+        velocity_y = 0.0
         if self.previous_y is not None and self.previous_seen is not None:
             elapsed = self.last_seen - self.previous_seen
             if elapsed > 0:
-                velocity = max(0.0, (self.y - self.previous_y) / elapsed)
-        return round(self.x), min(height - 1, round(self.y + velocity * latency_seconds))
+                velocity_y = max(0.0, (self.y - self.previous_y) / elapsed)
+                if self.previous_x is not None:
+                    velocity_x = (self.x - self.previous_x) / elapsed
+        return (
+            round(self.x + velocity_x * latency_seconds),
+            min(height - 1, round(self.y + velocity_y * latency_seconds)),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,16 +101,39 @@ class EnergyRainPlayer:
                 detections = _balls(frame.image) if game_frame else []
                 if detections:
                     last_targets = frame.captured_at
+                # An unclicked object that has not been observed for a short
+                # interval has left the board; retaining it lets a later ball
+                # inherit stale coordinates and causes duplicate/missed taps.
+                for key in list(tracks):
+                    track = tracks[key]
+                    if track.tapped_at is None and frame.captured_at - track.last_seen > 0.30:
+                        del tracks[key]
                 unmatched = set(tracks)
                 for x, y in detections:
                     candidate = min(
                         unmatched,
-                        key=lambda key: math.dist((tracks[key].x, tracks[key].y), (x, y)),
+                        key=lambda key: math.dist(
+                            tracks[key].predicted(0.0, frame.image.shape[0]), (x, y)
+                        ),
                         default=None,
                     )
-                    if candidate is not None and math.dist(
-                        (tracks[candidate].x, tracks[candidate].y), (x, y)
-                    ) <= self.config.realtime.dedup_radius_pixels * frame.image.shape[1] / device.size().width:
+                    if candidate is not None:
+                        track = tracks[candidate]
+                        elapsed = max(0.0, frame.captured_at - track.last_seen)
+                        speed = 0.0
+                        if track.previous_seen is not None and track.previous_x is not None:
+                            prior_elapsed = track.last_seen - track.previous_seen
+                            if prior_elapsed > 0:
+                                speed = math.dist(
+                                    (track.x, track.y),
+                                    (track.previous_x, track.previous_y or track.y),
+                                ) / prior_elapsed
+                        base_radius = self.config.realtime.dedup_radius_pixels * frame.image.shape[1] / device.size().width
+                        radius = min(base_radius * 2.5, base_radius + speed * elapsed * 1.5)
+                        distance = math.dist(track.predicted(0.0, frame.image.shape[0]), (x, y))
+                    else:
+                        radius = distance = 0.0
+                    if candidate is not None and distance <= radius:
                         tracks[candidate].update(x, y, frame.captured_at)
                         unmatched.remove(candidate)
                     else:
