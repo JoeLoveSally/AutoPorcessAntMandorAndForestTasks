@@ -3,7 +3,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from workflow.forest.energy_rain import Track, _balls, _is_game_frame
+from workflow.forest.energy_rain import Track, _balls, _is_game_frame, _safe_tap_point
 
 
 def test_stale_unanswered_tracks_are_safe_to_reclaim():
@@ -34,3 +34,9 @@ def test_ball_detector_can_be_gated_away_from_green_start_page():
 
     assert _balls(start)
     assert not _is_game_frame(start)
+
+
+def test_energy_rain_avoids_top_right_menu_but_allows_lower_targets():
+    assert not _safe_tap_point((660, 150), 720, 1600)
+    assert _safe_tap_point((660, 310), 720, 1600)
+    assert _safe_tap_point((610, 150), 720, 1600)

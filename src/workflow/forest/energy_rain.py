@@ -93,12 +93,21 @@ class EnergyRainPlayer:
             active_after = started + 2.6
             last_targets = active_after
             game_seen = False
+            non_game_frames = 0
             while time.monotonic() < deadline:
                 frame = stream.next_frame(timeout=3)
                 frames += 1
                 frame_times.append(frame.captured_at)
                 game_frame = frame.captured_at >= active_after and _is_game_frame(frame.image)
                 game_seen = game_seen or game_frame
+                if game_seen and not game_frame:
+                    non_game_frames += 1
+                    # The result/gift page can briefly resemble the game. Stop
+                    # before its reward text or top-right menu is tapped.
+                    if non_game_frames >= 8:
+                        break
+                elif game_frame:
+                    non_game_frames = 0
                 detections = _balls(frame.image) if game_frame else []
                 if detections:
                     last_targets = frame.captured_at
@@ -172,6 +181,8 @@ class EnergyRainPlayer:
                 # send only the two lowest (most urgent) balls, then recompute
                 # the rest from the next video frame.
                 for _urgency, track, local in sorted(eligible, reverse=True)[:2]:
+                    if not _safe_tap_point(local, frame.image.shape[1], frame.image.shape[0]):
+                        continue
                     touch.tap(frame.to_device(local))
                     track.tapped_at = time.monotonic()
                     taps += 1
@@ -235,3 +246,9 @@ def _is_game_frame(image: np.ndarray) -> bool:
         return False
     blue = cv2.inRange(board, (85, 50, 90), (125, 255, 255))
     return float(np.mean(blue > 0)) >= 0.35
+
+
+def _safe_tap_point(point: tuple[int, int], width: int, height: int) -> bool:
+    """Keep taps away from the persistent three-dot menu in the top-right."""
+    x, y = point
+    return not (x >= width * 0.90 and y <= height * 0.18)
