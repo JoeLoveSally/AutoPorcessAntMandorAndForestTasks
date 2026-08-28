@@ -27,30 +27,6 @@ class RecoveryPolicy:
             current = self.session.observe(f"recovery-{attempt}")
             if current.page in allowed_pages and not current.overlays:
                 return current
-            # Activity-level advertisements and promotional pages commonly do
-            # not expose a reliable close control.  Back is the safest and
-            # most portable dismissal because Alipay normally restores the
-            # page that launched the ad.  If Back is unavailable or does not
-            # clear the overlay, the normal close-button handling below (or a
-            # later recovery attempt) remains as a fallback.
-            promo = next(
-                (overlay for overlay in reversed(current.overlays)
-                 if overlay.type in (OverlayType.PROMO, OverlayType.UNKNOWN)),
-                None,
-            )
-            if promo is not None:
-                try:
-                    backed = self.session.back(current, f"recovery-back-{attempt}")
-                    current = backed
-                    if current.page in allowed_pages and not current.overlays:
-                        return current
-                    # Re-observe on the next attempt so a transient ad/page
-                    # transition is not mistaken for a failed source page.
-                    continue
-                except AutomationError:
-                    # Some test doubles/device states cannot issue Back; fall
-                    # through to a semantic close control when one exists.
-                    pass
             for overlay in reversed(current.overlays):
                 key = next(
                     (

@@ -120,20 +120,20 @@ def test_recover_dismisses_canvas_promo_overlay_via_close():
     assert session.taps == ["close"]
 
 
-def test_recover_backs_out_of_promo_before_using_close_control():
+def test_recover_closes_promo_before_backing_out():
     home = _screen(Page.FOREST_HOME)
     covered = _screen(Page.FOREST_HOME, (_overlay(OverlayType.PROMO, "close"),))
     session = FakeSession(
         observe_seq=[covered],
-        back_after=home,
+        tap_after={"close": home},
     )
     policy = RecoveryPolicy(session)
 
     result = policy.recover(covered, (Page.FOREST_HOME,))
 
     assert result.page is Page.FOREST_HOME
-    assert session.backs == ["recovery-back-1"]
-    assert session.taps == []
+    assert session.backs == []
+    assert session.taps == ["close"]
 
 
 def test_recover_backs_out_of_wrong_known_page():
