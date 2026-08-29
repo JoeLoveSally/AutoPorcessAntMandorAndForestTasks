@@ -205,6 +205,19 @@ class WorkflowSession:
             if result.status is ActionStatus.EXECUTED and after is not None:
                 return after
             raise AutomationError(result.error or f"Action failed: {name}")
+        if irreversible and expected and result.point is not None:
+            # The tap reached the device, so an irreversible action must
+            # never be repeated. Still perform the universal one-time Back
+            # check when the postcondition page was unexpected.
+            return self._retry_after_sent(
+                screen,
+                key,
+                name,
+                expected,
+                required_after,
+                result,
+                retry_source=False,
+            )
         if irreversible or not expected or result.point is None:
             # A point that is already set means the tap reached the device, so
             # retrying could repeat an irreversible action such as donating an
@@ -220,6 +233,7 @@ class WorkflowSession:
         expected: tuple[Page, ...],
         required_after: tuple[str, ...],
         result: ActionResult,
+        retry_source: bool = True,
     ) -> DetectedScreen:
         """Recover a sent tap whose postcondition disagreed.
 
@@ -258,7 +272,7 @@ class WorkflowSession:
                 # on, so re-looking it up is not required; the caller rescans.
                 self.current = restored
                 return restored
-            if restored.page is screen.page and restored.element(key) is not None:
+            if retry_source and restored.page is screen.page and restored.element(key) is not None:
                 result, after = self._tap_raw(restored, key, name, expected, required_after)
                 if result.status is ActionStatus.EXECUTED and after is not None:
                     return after

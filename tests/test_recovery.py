@@ -250,9 +250,41 @@ def test_tap_recovers_source_page_before_retrying_destination_action():
 
 def test_tap_does_not_retry_when_point_already_sent():
     initial = _screen(Page.MANOR_DONATION_CONFIRM)
-    actions = FakeActions([_result(ActionStatus.REJECTED, point=(100, 100))])
+    wrong = _screen(Page.CHICKEN_KITCHEN)
+    success = _screen(Page.MANOR_DONATION_SUCCESS)
+    actions = FakeActions([
+        _result(ActionStatus.REJECTED, point=(100, 100)),
+        _result(ActionStatus.EXECUTED, point=None, after=success),
+    ])
     recovery = FakeRecovery(_screen(Page.MANOR_DONATION_CONFIRM))
     session = _session_for_tap(initial, actions, recovery)
+    session.observe = lambda _reason: wrong
+
+    result = session.tap(
+        initial,
+        "confirm_donation",
+        "donate",
+        expected=(Page.MANOR_DONATION_SUCCESS,),
+        irreversible=True,
+    )
+
+    assert result is success
+    # A point was already sent to the device — only Back is allowed; the
+    # donation tap itself is never repeated.
+    assert not recovery.called
+    assert actions.calls == ["donate", "donate-back-out"]
+
+
+def test_irreversible_sent_tap_stops_when_back_returns_to_source():
+    initial = _screen(Page.MANOR_DONATION_CONFIRM, elements=("confirm_donation",))
+    wrong = _screen(Page.CHICKEN_KITCHEN)
+    restored = _screen(Page.MANOR_DONATION_CONFIRM, elements=("confirm_donation",))
+    actions = FakeActions([
+        _result(ActionStatus.REJECTED, point=(100, 100)),
+        _result(ActionStatus.EXECUTED, point=None, after=restored),
+    ])
+    session = _session_for_tap(initial, actions, FakeRecovery(initial))
+    session.observe = lambda _reason: wrong
 
     with pytest.raises(AutomationError):
         session.tap(
@@ -263,10 +295,7 @@ def test_tap_does_not_retry_when_point_already_sent():
             irreversible=True,
         )
 
-    # A point was already sent to the device — retrying could donate a second
-    # egg, so an irreversible action must never retry (design §6).
-    assert not recovery.called
-    assert actions.calls == ["donate"]
+    assert actions.calls == ["donate", "donate-back-out"]
 
 
 def test_sent_tap_accepts_late_arriving_expected_page():
