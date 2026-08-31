@@ -28,6 +28,7 @@ class Page(StrEnum):
     CHICKEN_KITCHEN = "chicken_kitchen"
     KITCHEN_DONATE = "kitchen_donate"
     FOREST_HOME = "forest_home"
+    FOREST_CAMPAIGN = "forest_campaign"
     FOREST_SIGN_REWARD = "forest_sign_reward"
     FOREST_FRIEND = "forest_friend"
     FOREST_TREASURE = "forest_treasure"

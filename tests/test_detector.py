@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import cv2
 import numpy as np
 from conftest import make_observation
@@ -21,6 +23,18 @@ def test_alipay_home_requires_both_entries():
     assert set(page.elements) == {"manor", "forest"}
 
 
+def test_feed_panel_title_and_forest_task_do_not_impersonate_alipay_home():
+    shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
+      <node text='蚂蚁庄园' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[152,203][432,293]' />
+      <node text='饲料任务' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[416,976][1024,1128]' />
+      <node text='去看看我的10周年故事 逛一逛蚂蚁森林10周年' content-desc='' resource-id='' class='TextView' clickable='true' enabled='true' bounds='[36,2984][1060,3200]' />
+    </hierarchy>"""
+
+    page = ScreenDetector().detect(make_observation(shaped))
+
+    assert page.page is Page.MANOR_FEED_TASKS
+
+
 def test_overlay_does_not_replace_underlying_feed_page():
     page = ScreenDetector().detect(
         make_observation(xml("饲料任务", "领饲料", "猜价格赢饲料", "放弃奖励"))
@@ -28,6 +42,58 @@ def test_overlay_does_not_replace_underlying_feed_page():
     assert page.page is Page.MANOR_FEED_TASKS
     assert page.overlays[0].type is OverlayType.PRODUCT_QUIZ
     assert page.element("abandon_reward") is not None
+
+
+def test_living_activity_wins_over_stale_feed_task_dom():
+    observation = replace(
+        make_observation(xml("饲料任务", "领饲料", "看庄园小视频", "去完成")),
+        activity="com.alipay.android.living.activity.LivingDetailActivity",
+    )
+
+    page = ScreenDetector().detect(observation)
+
+    assert page.page is Page.EXTERNAL_BROWSE
+    assert page.evidence == ("activity:LivingDetailActivity",)
+
+
+def test_feed_daily_claim_is_limited_to_top_sign_in_card():
+    shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
+      <node text='饲料任务' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[0,900][1440,1000]' />
+      <node text='领取30克饲料' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[1056,1144][1404,1460]' />
+      <node text='领取180克饲料' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[1056,1492][1404,1832]' />
+    </hierarchy>"""
+
+    page = ScreenDetector().detect(make_observation(shaped))
+
+    assert page.page is Page.MANOR_FEED_TASKS
+    assert page.element("daily_claim").bounds == Bounds(1056, 1144, 1404, 1460)
+
+
+def test_completed_feed_task_reward_is_not_daily_claim():
+    shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
+      <node text='饲料任务' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[0,900][1440,1000]' />
+      <node text='领取180克饲料' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[1056,1492][1404,1832]' />
+      <node text='领取90克饲料' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[1056,1864][1404,2204]' />
+    </hierarchy>"""
+
+    page = ScreenDetector().detect(make_observation(shaped))
+
+    assert page.page is Page.MANOR_FEED_TASKS
+    assert page.element("daily_claim") is None
+
+
+def test_completed_feed_task_title_is_not_an_action_entry():
+    shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
+      <node text='饲料任务' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[0,900][1440,1000]' />
+      <node text='看庄园小视频 和小鸡一起看15s公益小视频' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[100,1492][1000,1832]' />
+      <node text='领取90克饲料' content-desc='' resource-id='' class='Button' clickable='true' enabled='true' bounds='[1056,1492][1404,1832]' />
+    </hierarchy>"""
+
+    page = ScreenDetector().detect(make_observation(shaped))
+
+    assert page.page is Page.MANOR_FEED_TASKS
+    assert page.element("video") is None
+    assert page.element("daily_claim") is None
 
 
 def test_wrong_package_is_unknown():
@@ -54,6 +120,55 @@ def test_forest_home_card_does_not_look_like_energy_rain_start_page():
         make_observation(xml("蚂蚁森林", "天天能量雨", "找能量", "真爱合种"))
     )
     assert page.page is Page.FOREST_HOME
+
+
+def test_canvas_treasure_entry_binds_draw_from_visual_signature():
+    shaped = xml("森林寻宝", "TA待收的能量")
+    image = np.zeros((3200, 1440, 3), dtype=np.uint8)
+    cv2.rectangle(image, (396, 2417), (1053, 2627), (0, 220, 255), -1)
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+
+    page = ScreenDetector().detect(
+        make_observation(shaped, screenshot=encoded.tobytes())
+    )
+
+    assert page.page is Page.FOREST_TREASURE
+    assert page.element("enter_lottery").source == "cv:treasure_draw_button"
+    assert page.element("enter_lottery").center == (725, 2522)
+
+
+def test_anniversary_banner_does_not_hide_structural_forest_home():
+    page = ScreenDetector().detect(
+        make_observation(
+            xml(
+                "蚂蚁森林",
+                "蚂蚁森林10周年啦！",
+                "切换为个人版",
+                "森林广场",
+                "森林动态",
+            )
+        )
+    )
+
+    assert page.page is Page.FOREST_HOME
+
+
+def test_diary_tutorial_is_modelled_as_diary_with_skip_control():
+    shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
+      <node text='名字' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[152,384][252,464]' />
+      <node text='体重' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[152,480][252,560]' />
+      <node text='状态' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[152,576][252,656]' />
+      <node text='模版/A11' content-desc='' resource-id='' class='Image' clickable='false' enabled='true' bounds='[0,856][1440,2936]' />
+      <node text='快乐法则：对自己好一点，再好一点！' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[520,976][1336,1040]' />
+      <node text='点赞' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[1032,2684][1344,2820]' />
+      <node text='跳过' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[1132,332][1320,436]' />
+    </hierarchy>"""
+
+    page = ScreenDetector().detect(make_observation(shaped))
+
+    assert page.page is Page.MANOR_DIARY
+    assert page.element("skip_tutorial") is not None
 
 
 def test_membership_plant_task_is_not_forest_home():
@@ -343,6 +458,42 @@ def test_love_plant_canvas_page_binds_water_from_vision_not_tree_fragments():
     assert page.element("water").source == "cv_layout:love_plant_water"
 
 
+def test_love_plant_canvas_reward_is_not_misclassified_as_forest_home():
+    image = np.full((3200, 1440, 3), 22, dtype=np.uint8)
+    cv2.ellipse(image, (720, 2307), (302, 75), 0, 0, 360, (215, 80, 190), -1)
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+    shaped = xml("蚂蚁森林", "真爱合种", "森林广场", "森林动态", "切换为个人版")
+
+    page = ScreenDetector().detect(
+        make_observation(shaped, screenshot=encoded.tobytes())
+    )
+
+    assert page.page is Page.FOREST_LOVE_PLANT
+    close = page.element("close_reward")
+    assert close is not None
+    assert close.source == "cv:love_plant_reward_button"
+
+
+def test_co_plant_canvas_page_binds_visual_watering_action():
+    image = np.full((3200, 1440, 3), (250, 205, 180), dtype=np.uint8)
+    cv2.circle(image, (1240, 3000), 120, (245, 160, 25), -1)
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+
+    page = ScreenDetector().detect(
+        make_observation(
+            xml("小树苗", "TA是队长", "今日排行"),
+            screenshot=encoded.tobytes(),
+        )
+    )
+
+    assert page.page is Page.FOREST_CO_PLANT
+    water = page.element("water")
+    assert water is not None
+    assert water.source == "cv:co_plant_water_button"
+
+
 def test_love_plant_amount_modal_is_not_misclassified_as_forest_home():
     page = ScreenDetector().detect(
         make_observation(
@@ -416,7 +567,7 @@ def test_friend_hidden_one_click_node_is_ignored_without_visual_button():
     assert page.element("one_click") is None
 
 
-def test_anniversary_campaign_is_not_the_forest_home_or_a_lottery():
+def test_anniversary_watering_campaign_has_an_explicit_safe_page():
     # Real-device dump (run 20260827-052152): the full-screen 10th-anniversary
     # campaign also contains 蚂蚁森林 and 活动剩余时间 in its tree; without the
     # campaign guard it classified as the forest home and every carousel swipe
@@ -429,10 +580,10 @@ def test_anniversary_campaign_is_not_the_forest_home_or_a_lottery():
       <node text='蚂蚁森林10周年' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[360,420][1080,520]' />
     </hierarchy>"""
     page = ScreenDetector().detect(make_observation(shaped))
-    assert page.page is Page.UNKNOWN
+    assert page.page is Page.FOREST_CAMPAIGN
 
 
-def test_anniversary_certificate_page_is_not_forest_home():
+def test_anniversary_certificate_page_is_explicit_campaign():
     shaped = """<?xml version='1.0'?><hierarchy rotation='0'>
       <node text='蚂蚁森林' content-desc='' resource-id='' class='WebView' clickable='false' enabled='true' bounds='[0,0][1440,3200]' />
       <node text='10周年种树' content-desc='' resource-id='' class='TextView' clickable='false' enabled='true' bounds='[80,170][480,280]' />
@@ -441,4 +592,4 @@ def test_anniversary_certificate_page_is_not_forest_home():
 
     page = ScreenDetector().detect(make_observation(shaped))
 
-    assert page.page is Page.UNKNOWN
+    assert page.page is Page.FOREST_CAMPAIGN

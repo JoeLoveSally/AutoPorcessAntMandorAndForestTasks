@@ -24,6 +24,7 @@ from runtime.config import Config
 from runtime.errors import AutomationError, StepTimeout
 from runtime.state_store import StateStore
 from screen_perception import ObservationCollector, ObservationMode, ScreenDetector
+from state_machine import StateMachine
 from workflow.recovery import RecoveryPolicy
 
 
@@ -47,6 +48,9 @@ class WorkflowSession:
             config.runtime.settle_seconds,
         )
         self.store = StateStore(config.runtime.state_database)
+        self.machine = StateMachine(
+            self.run_id, self.name, self.store, self.logger
+        )
         self.result = RunResult(
             self.run_id,
             name,
@@ -61,6 +65,13 @@ class WorkflowSession:
         if not self.store.acquire_lock("daily", self.run_id):
             raise AutomationError("Another daily workflow holds the process lock")
         self.logger.emit("workflow.started", workflow=self.name, run_id=self.run_id, device=self.device.serial)
+        incomplete = self.store.incomplete_steps(self.name)
+        if incomplete:
+            self.logger.emit(
+                "resume.incomplete_steps",
+                steps=[item.step for item in incomplete],
+                source_runs=sorted({item.run_id for item in incomplete}),
+            )
 
     def finish(self, status: StepStatus, error: str | None = None) -> RunResult:
         self.result.status = status
@@ -102,14 +113,14 @@ class WorkflowSession:
         latest = None
         while time.monotonic() < deadline:
             latest = self.observe(reason)
-            if latest.page in expected and all(latest.element(key) is not None for key in required):
+            if latest.page in expected and _matches_elements(latest, required, (), ()):
                 # One passing observation can catch a transition or a popup
                 # mid-load; require the next observation to agree before any
                 # action is validated against this page.
                 time.sleep(self.config.runtime.poll_interval_seconds)
                 confirmed = self.observe(f"{reason}-confirm")
-                if confirmed.page is latest.page and all(
-                    confirmed.element(key) is not None for key in required
+                if confirmed.page is latest.page and _matches_elements(
+                    confirmed, required, (), ()
                 ):
                     return confirmed
                 latest = confirmed
@@ -119,8 +130,8 @@ class WorkflowSession:
         # or slow page load may simply have masked the target. Try one recovery
         # pass before declaring the wait failed.
         if expected and latest is not None:
-            recovered = self.recover(expected)
-            if all(recovered.element(key) is not None for key in required):
+            recovered = self.recover(expected, required=required)
+            if _matches_elements(recovered, required, (), ()):
                 return recovered
             detail = recovered.page.value
         else:
@@ -134,6 +145,8 @@ class WorkflowSession:
         name: str,
         expected: tuple[Page, ...] = (),
         required_after: tuple[str, ...] = (),
+        required_any_after: tuple[str, ...] = (),
+        forbidden_after: tuple[str, ...] = (),
     ) -> tuple[ActionResult, DetectedScreen | None]:
         """Execute a tap with no recovery; return the result and next screen.
 
@@ -145,7 +158,16 @@ class WorkflowSession:
             screen,
             Action(name, ActionKind.TAP, key),
             expected,
-            (lambda page: all(page.element(item) is not None for item in required_after)) if required_after else None,
+            (
+                lambda page: _matches_elements(
+                    page,
+                    required_after,
+                    required_any_after,
+                    forbidden_after,
+                )
+            )
+            if required_after or required_any_after or forbidden_after
+            else None,
         )
         self.result.actions.append(result)
         if result.status is ActionStatus.EXECUTED and after is not None:
@@ -160,8 +182,20 @@ class WorkflowSession:
         expected: tuple[Page, ...] = (),
         required_after: tuple[str, ...] = (),
         irreversible: bool = False,
+        reenter: Callable[[], DetectedScreen] | None = None,
+        required_any_after: tuple[str, ...] = (),
+        forbidden_after: tuple[str, ...] = (),
     ) -> DetectedScreen:
-        result, after = self._tap_raw(screen, key, name, expected, required_after)
+        screen = self._refresh_aged_source(screen, key, name)
+        result, after = self._tap_raw(
+            screen,
+            key,
+            name,
+            expected,
+            required_after,
+            required_any_after,
+            forbidden_after,
+        )
         if result.status is ActionStatus.EXECUTED and after is not None:
             return after
         # A popup dismissal or WebView redraw can invalidate the source
@@ -182,7 +216,15 @@ class WorkflowSession:
                 refreshed = self.observe(f"{name}-refresh-{attempt}")
                 if refreshed.page is not screen.page or refreshed.element(key) is None:
                     continue
-                result, after = self._tap_raw(refreshed, key, name, expected, required_after)
+                result, after = self._tap_raw(
+                    refreshed,
+                    key,
+                    name,
+                    expected,
+                    required_after,
+                    required_any_after,
+                    forbidden_after,
+                )
                 if result.status is ActionStatus.EXECUTED and after is not None:
                     return after
                 break
@@ -198,8 +240,21 @@ class WorkflowSession:
         ):
             self._recovering = True
             try:
-                recovered = self.recover((screen.page,))
-                result, after = self._tap_raw(recovered, key, name, expected, required_after)
+                recovered = self.recover(
+                    (screen.page,),
+                    reenter,
+                    required=(key,),
+                    activity=screen.observation.activity,
+                )
+                result, after = self._tap_raw(
+                    recovered,
+                    key,
+                    name,
+                    expected,
+                    required_after,
+                    required_any_after,
+                    forbidden_after,
+                )
             finally:
                 self._recovering = False
             if result.status is ActionStatus.EXECUTED and after is not None:
@@ -217,13 +272,67 @@ class WorkflowSession:
                 required_after,
                 result,
                 retry_source=False,
+                reenter=reenter,
+                required_any_after=required_any_after,
+                forbidden_after=forbidden_after,
             )
         if irreversible or not expected or result.point is None:
             # A point that is already set means the tap reached the device, so
             # retrying could repeat an irreversible action such as donating an
             # egg — that is never allowed (design §6).
             raise AutomationError(result.error or f"Action failed: {name}")
-        return self._retry_after_sent(screen, key, name, expected, required_after, result)
+        return self._retry_after_sent(
+            screen,
+            key,
+            name,
+            expected,
+            required_after,
+            result,
+            reenter=reenter,
+            required_any_after=required_any_after,
+            forbidden_after=forbidden_after,
+        )
+
+    def _refresh_aged_source(
+        self,
+        screen: DetectedScreen,
+        key: str,
+        name: str,
+    ) -> DetectedScreen:
+        """Replace an aged action source with a newly observed equivalent.
+
+        Element/observation identity prevents mixing coordinates inside one
+        snapshot, but it does not prove that the phone still shows that
+        snapshot.  Once the source exceeds the configured age budget, require
+        the same page, Activity and target element on a fresh observation.
+        """
+        if not hasattr(self, "config"):
+            # Lightweight unit-test sessions can exercise recovery without a
+            # runtime configuration; production sessions always have one.
+            return screen
+        age = (datetime.now(timezone.utc) - screen.observation.captured_at).total_seconds()
+        limit = getattr(self.config.runtime, "max_observation_age_seconds", 3.0)
+        if age <= limit:
+            return screen
+        refreshed = self.observe(f"{name}-source-refresh")
+        same_activity = (
+            screen.observation.activity is None
+            or refreshed.observation.activity == screen.observation.activity
+        )
+        if (
+            refreshed.page is not screen.page
+            or not same_activity
+            or refreshed.element(key) is None
+            or any(
+                error.startswith("unstable_observation")
+                for error in refreshed.observation.errors
+            )
+        ):
+            raise AutomationError(
+                f"Source context changed before {name}: "
+                f"expected {screen.page.value}/{key}, got {refreshed.page.value}"
+            )
+        return refreshed
 
     def _retry_after_sent(
         self,
@@ -234,6 +343,9 @@ class WorkflowSession:
         required_after: tuple[str, ...],
         result: ActionResult,
         retry_source: bool = True,
+        reenter: Callable[[], DetectedScreen] | None = None,
+        required_any_after: tuple[str, ...] = (),
+        forbidden_after: tuple[str, ...] = (),
     ) -> DetectedScreen:
         """Recover a sent tap whose postcondition disagreed.
 
@@ -248,8 +360,8 @@ class WorkflowSession:
         self._recovering = True
         try:
             fresh = self.observe(f"{name}-sent-check")
-            if fresh.page in expected and all(
-                fresh.element(item) is not None for item in required_after
+            if fresh.page in expected and _matches_elements(
+                fresh, required_after, required_any_after, forbidden_after
             ):
                 self.current = fresh
                 return fresh
@@ -264,16 +376,28 @@ class WorkflowSession:
                     after_back = None
                 if after_back is not None:
                     restored = after_back
-            if restored.page in expected and all(
-                restored.element(item) is not None for item in required_after
+            if restored.page in expected and _matches_elements(
+                restored, required_after, required_any_after, forbidden_after
             ):
                 # Back succeeded and the page the action was validated against
                 # is back. A floating target (an energy bubble) may have moved
                 # on, so re-looking it up is not required; the caller rescans.
                 self.current = restored
                 return restored
+            if reenter is not None and not (
+                restored.page is screen.page and restored.element(key) is not None
+            ):
+                restored = reenter()
             if retry_source and restored.page is screen.page and restored.element(key) is not None:
-                result, after = self._tap_raw(restored, key, name, expected, required_after)
+                result, after = self._tap_raw(
+                    restored,
+                    key,
+                    name,
+                    expected,
+                    required_after,
+                    required_any_after,
+                    forbidden_after,
+                )
                 if result.status is ActionStatus.EXECUTED and after is not None:
                     return after
             raise AutomationError(result.error or f"Action failed: {name}")
@@ -284,6 +408,11 @@ class WorkflowSession:
         self,
         allowed_pages: tuple[Page, ...],
         reenter: Callable[[], DetectedScreen] | None = None,
+        *,
+        required: tuple[str, ...] = (),
+        required_any: tuple[str, ...] = (),
+        forbidden: tuple[str, ...] = (),
+        activity: str | None = None,
     ) -> DetectedScreen:
         """Re-observe, dismiss known overlays and back out to an allowed page.
 
@@ -293,7 +422,15 @@ class WorkflowSession:
         """
         if self.current is None:
             raise AutomationError("Cannot recover without a prior observation")
-        return self.recovery.recover(self.current, allowed_pages, reenter)
+        return self.recovery.recover(
+            self.current,
+            allowed_pages,
+            reenter,
+            required=required,
+            required_any=required_any,
+            forbidden=forbidden,
+            activity=activity,
+        )
 
     def back(self, screen: DetectedScreen, name: str, expected: tuple[Page, ...] = ()) -> DetectedScreen:
         result, after = self.actions.execute(screen, Action(name, ActionKind.BACK), expected)
@@ -310,10 +447,12 @@ class WorkflowSession:
         start: tuple[int, int],
         end: tuple[int, int],
         duration_ms: int = 400,
+        expected: tuple[Page, ...] = (),
     ) -> DetectedScreen:
         result, after = self.actions.execute(
             screen,
             Action(name, ActionKind.SWIPE, start=start, end=end, duration_ms=duration_ms),
+            expected,
         )
         self.result.actions.append(result)
         if result.status is not ActionStatus.EXECUTED or after is None:
@@ -355,5 +494,27 @@ class WorkflowSession:
         result = StepResult(name, status, detail, attempts)
         self.result.steps.append(result)
         observation_id = self.current.observation.id if self.current else None
-        self.store.save_step(self.run_id, self.name, name, status, observation_id, detail)
-        self.logger.emit("step.finished", step=name, status=status.value, detail=detail, attempts=attempts)
+        self.machine.record(result, observation_id)
+
+    def begin_step(self, name: str, detail: str | None = None) -> None:
+        """Persist intent immediately before a potentially irreversible action."""
+        observation_id = self.current.observation.id if self.current else None
+        self.machine.begin(name, observation_id, detail)
+
+
+def _matches_elements(
+    screen: DetectedScreen,
+    required: tuple[str, ...],
+    required_any: tuple[str, ...],
+    forbidden: tuple[str, ...],
+) -> bool:
+    stable = not any(
+        error.startswith("unstable_observation")
+        for error in screen.observation.errors
+    )
+    return (
+        stable
+        and all(screen.element(key) is not None for key in required)
+        and (not required_any or any(screen.element(key) is not None for key in required_any))
+        and all(screen.element(key) is None for key in forbidden)
+    )

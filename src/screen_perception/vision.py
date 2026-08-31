@@ -107,6 +107,95 @@ def detect_yellow_right_button(content: bytes) -> tuple[int, int] | None:
     return max(candidates, default=(0, None))[1]
 
 
+def detect_treasure_draw_button(content: bytes) -> tuple[int, int, float] | None:
+    """Find the large bottom-centre draw pill on the Canvas treasure entry.
+
+    The treasure WebView exposes its title but not the button text.  Keep this
+    detector deliberately layout-specific: callers must also require the
+    semantic 森林寻宝 title before using the returned point.
+    """
+    image = decode_png(content)
+    height, width = image.shape[:2]
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, (15, 80, 170), (38, 255, 255))
+    count, _, stats, _ = cv2.connectedComponentsWithStats(mask)
+    candidates: list[tuple[int, tuple[int, int, float]]] = []
+    for left, top, item_width, item_height, area in stats[1:count]:
+        center_x = int(left + item_width // 2)
+        center_y = int(top + item_height // 2)
+        if not width * 0.40 < center_x < width * 0.60:
+            continue
+        if not height * 0.72 < center_y < height * 0.84:
+            continue
+        if not width * 0.35 < item_width < width * 0.62:
+            continue
+        if not height * 0.04 < item_height < height * 0.10:
+            continue
+        fill = area / (item_width * item_height)
+        if fill < 0.45:
+            continue
+        candidates.append((int(area), (center_x, center_y, min(0.92, float(fill)))))
+    return max(candidates, default=(0, None))[1]
+
+
+def detect_love_plant_reward_button(content: bytes) -> tuple[int, int, float] | None:
+    """Find the purple acknowledgement pill on a love-plant reward layer.
+
+    The reward is Canvas-only: the accessibility tree keeps exposing the
+    underlying 真爱合种 calendar but publishes neither ``我知道啦`` nor the
+    close X.  Callers must therefore pair this deliberately narrow visual
+    signature with the semantic 真爱合种 marker before using the point.
+    """
+    image = decode_png(content)
+    height, width = image.shape[:2]
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, (125, 55, 95), (175, 255, 255))
+    count, _, stats, _ = cv2.connectedComponentsWithStats(mask)
+    candidates: list[tuple[int, tuple[int, int, float]]] = []
+    for left, top, item_width, item_height, area in stats[1:count]:
+        center_x = int(left + item_width // 2)
+        center_y = int(top + item_height // 2)
+        if not width * 0.40 < center_x < width * 0.60:
+            continue
+        if not height * 0.67 < center_y < height * 0.77:
+            continue
+        if not width * 0.32 < item_width < width * 0.55:
+            continue
+        if not height * 0.03 < item_height < height * 0.08:
+            continue
+        fill = area / (item_width * item_height)
+        if fill < 0.45:
+            continue
+        candidates.append((int(area), (center_x, center_y, min(0.94, float(fill)))))
+    return max(candidates, default=(0, None))[1]
+
+
+def detect_co_plant_water_button(content: bytes) -> tuple[int, int, float] | None:
+    """Find the large blue watering action on the co-plant Canvas page."""
+    image = decode_png(content)
+    height, width = image.shape[:2]
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, (85, 75, 110), (125, 255, 255))
+    count, _, stats, _ = cv2.connectedComponentsWithStats(mask)
+    candidates: list[tuple[int, tuple[int, int, float]]] = []
+    for left, top, item_width, item_height, area in stats[1:count]:
+        center_x = int(left + item_width // 2)
+        center_y = int(top + item_height // 2)
+        if not width * 0.75 < center_x < width * 0.98:
+            continue
+        if not height * 0.86 < center_y < height * 0.98:
+            continue
+        if not width * 0.10 < item_width < width * 0.25:
+            continue
+        if not height * 0.05 < item_height < height * 0.13:
+            continue
+        fill = area / (item_width * item_height)
+        if fill < 0.35:
+            continue
+        candidates.append((int(area), (center_x, center_y, min(0.93, float(fill)))))
+    return max(candidates, default=(0, None))[1]
+
+
 def detect_manor_home_controls(content: bytes) -> dict[str, tuple[int, int, float]]:
     image = decode_png(content)
     height, width = image.shape[:2]

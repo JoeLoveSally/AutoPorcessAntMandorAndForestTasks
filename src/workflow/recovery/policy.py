@@ -19,13 +19,25 @@ class RecoveryPolicy:
         screen: DetectedScreen,
         allowed_pages: tuple[Page, ...],
         reenter=None,
+        *,
+        required: tuple[str, ...] = (),
+        required_any: tuple[str, ...] = (),
+        forbidden: tuple[str, ...] = (),
+        activity: str | None = None,
     ) -> DetectedScreen:
         current = screen
         for attempt in range(1, self.session.config.runtime.max_recovery_attempts + 1):
             self.session.logger.emit("recovery.attempt", attempt=attempt, page=current.page.value)
             time.sleep(self.session.config.runtime.settle_seconds)
             current = self.session.observe(f"recovery-{attempt}")
-            if current.page in allowed_pages and not current.overlays:
+            if _matches_context(
+                current,
+                allowed_pages,
+                required,
+                required_any,
+                forbidden,
+                activity,
+            ):
                 return current
             for overlay in reversed(current.overlays):
                 key = next(
@@ -61,10 +73,48 @@ class RecoveryPolicy:
                     current = self.session.back(current, f"recovery-back-{attempt}")
                 except AutomationError:
                     pass
-            if current.page in allowed_pages:
+            if _matches_context(
+                current,
+                allowed_pages,
+                required,
+                required_any,
+                forbidden,
+                activity,
+            ):
                 return current
             if reenter is not None:
                 current = reenter()
-                if current.page in allowed_pages:
+                if _matches_context(
+                    current,
+                    allowed_pages,
+                    required,
+                    required_any,
+                    forbidden,
+                    activity,
+                ):
                     return current
         raise AutomationError(f"Recovery budget exhausted; latest={current.page.value}")
+
+
+def _matches_context(
+    screen: DetectedScreen,
+    pages: tuple[Page, ...],
+    required: tuple[str, ...],
+    required_any: tuple[str, ...],
+    forbidden: tuple[str, ...],
+    activity: str | None,
+) -> bool:
+    """Require a usable task context, not merely a matching page enum."""
+    stable = not any(
+        error.startswith("unstable_observation")
+        for error in screen.observation.errors
+    )
+    return (
+        screen.page in pages
+        and stable
+        and not screen.overlays
+        and (activity is None or screen.observation.activity == activity)
+        and all(screen.element(key) is not None for key in required)
+        and (not required_any or any(screen.element(key) is not None for key in required_any))
+        and all(screen.element(key) is None for key in forbidden)
+    )

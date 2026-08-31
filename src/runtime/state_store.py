@@ -111,6 +111,34 @@ class StateStore:
             return None
         return StepRecord(row[0], row[1], row[2], StepStatus(row[3]), datetime.fromisoformat(row[4]), row[5], row[6])
 
+    def incomplete_steps(self, workflow: str) -> tuple[StepRecord, ...]:
+        """Return steps whose newest cross-run record is still IN_PROGRESS."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT state.run_id, state.workflow, state.step, state.status,
+                       state.updated_at, state.observation_id, state.detail
+                FROM step_state AS state
+                JOIN (
+                    SELECT step, MAX(updated_at) AS newest
+                    FROM step_state
+                    WHERE workflow=?
+                    GROUP BY step
+                ) AS latest
+                  ON latest.step=state.step AND latest.newest=state.updated_at
+                WHERE state.workflow=? AND state.status=?
+                ORDER BY state.updated_at
+                """,
+                (workflow, workflow, StepStatus.IN_PROGRESS.value),
+            ).fetchall()
+        return tuple(
+            StepRecord(
+                row[0], row[1], row[2], StepStatus(row[3]),
+                datetime.fromisoformat(row[4]), row[5], row[6],
+            )
+            for row in rows
+        )
+
     def acquire_lock(self, name: str, owner: str) -> bool:
         with self._connect() as connection:
             existing = connection.execute(

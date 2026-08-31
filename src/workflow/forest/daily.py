@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 
 from domain_data import DetectedScreen, Page, StepStatus
@@ -45,6 +46,8 @@ class ForestWorkflow:
 
     def _collect_own_energy(self, forest: DetectedScreen) -> DetectedScreen:
         collected = 0
+        attempted_points: list[tuple[int, int]] = []
+        radius = self.session.config.realtime.dedup_radius_pixels
         for scan in range(4):
             keys = sorted(
                 key
@@ -53,11 +56,34 @@ class ForestWorkflow:
             )
             if not keys:
                 break
+            attempted_this_scan = 0
             for key in keys:
-                if not forest.element(key):
+                element = forest.element(key)
+                if element is None or any(
+                    math.dist(element.center, prior) <= radius
+                    for prior in attempted_points
+                ):
                     continue
+                point = element.center
                 forest = self.session.tap(forest, key, f"forest-own-energy-{collected + 1}", (Page.FOREST_HOME,))
-                collected += 1
+                attempted_points.append(point)
+                attempted_this_scan += 1
+                remaining = [
+                    item.center
+                    for item_key, item in forest.elements.items()
+                    if item_key.startswith("energy_")
+                    and item_key.removeprefix("energy_").isdigit()
+                ]
+                if any(math.dist(point, candidate) <= radius for candidate in remaining):
+                    self.session.logger.emit(
+                        "forest.energy_rejected_static",
+                        point=point,
+                        reason="green target remained after tap",
+                    )
+                else:
+                    collected += 1
+            if attempted_this_scan == 0:
+                break
             forest = self.session.observe(f"forest-own-energy-scan-{scan + 1}")
         if forest.element("energy_sign"):
             reward = self.session.tap(
@@ -113,7 +139,11 @@ class ForestWorkflow:
         friends = 0
         size = self.session.device.size()
         for index in range(self.session.config.runtime.max_task_iterations):
-            if current.page in (Page.FOREST_TREASURE, Page.FOREST_HOME):
+            if current.page in (
+                Page.FOREST_TREASURE,
+                Page.FOREST_HOME,
+                Page.FOREST_CAMPAIGN,
+            ):
                 break
             if current.page is not Page.FOREST_FRIEND:
                 raise AutomationError(f"Friend page {index + 1} left the friend list")
@@ -138,14 +168,26 @@ class ForestWorkflow:
                 (size.width // 2, int(size.height * 0.76)),
                 (size.width // 2, int(size.height * 0.30)),
                 450,
+                (
+                    Page.FOREST_FRIEND,
+                    Page.FOREST_TREASURE,
+                    Page.FOREST_HOME,
+                    Page.FOREST_CAMPAIGN,
+                ),
             )
             if current.page not in (
                 Page.FOREST_FRIEND,
                 Page.FOREST_TREASURE,
                 Page.FOREST_HOME,
+                Page.FOREST_CAMPAIGN,
             ):
                 current = self.session.wait_for(
-                    (Page.FOREST_FRIEND, Page.FOREST_TREASURE, Page.FOREST_HOME),
+                    (
+                        Page.FOREST_FRIEND,
+                        Page.FOREST_TREASURE,
+                        Page.FOREST_HOME,
+                        Page.FOREST_CAMPAIGN,
+                    ),
                     f"forest-friend-settle-{index + 1}",
                 )
         else:
@@ -153,6 +195,12 @@ class ForestWorkflow:
         lotteries = current.page is Page.FOREST_TREASURE
         if lotteries:
             current = self._forest_lotteries(current)
+        elif current.page is Page.FOREST_CAMPAIGN:
+            current = self.session.back(
+                current,
+                "forest-leave-friend-campaign",
+                (Page.FOREST_HOME,),
+            )
         self.session.add_step(
             "forest.collect_friend_energy",
             StepStatus.SUCCESS,
@@ -200,6 +248,10 @@ class ForestWorkflow:
         return current
 
     def _water(self, forest: DetectedScreen) -> DetectedScreen:
+        forest = self._water_love_plant(forest)
+        return self._water_co_plant(forest)
+
+    def _water_love_plant(self, forest: DetectedScreen) -> DetectedScreen:
         forest = self._locate_carousel(forest, "love_plant")
         if forest.element("love_plant"):
             page = self.session.tap(
@@ -210,23 +262,52 @@ class ForestWorkflow:
             page = self.session.tap(page, "water", "forest-love-plant-amount", (Page.FOREST_LOVE_PLANT,))
             for index in range(8):
                 page = self.session.tap(page, "plus", f"forest-love-plant-plus-{index + 1}", (Page.FOREST_LOVE_PLANT,))
+            self.session.begin_step(
+                "forest.water_love_plant", "about to submit 100g watering"
+            )
             page = self.session.tap(
-                page, "confirm", "forest-love-plant-confirm", (Page.FOREST_LOVE_PLANT,), irreversible=True,
+                page,
+                "confirm",
+                "forest-love-plant-confirm",
+                (Page.FOREST_LOVE_PLANT, Page.FOREST_HOME),
+                irreversible=True,
             )
             if page.element("close_reward"):
                 page = self.session.tap(page, "close_reward", "forest-love-plant-finish-reward", (Page.FOREST_LOVE_PLANT,))
-            forest = self.session.back(page, "forest-love-plant-leave", (Page.FOREST_HOME,))
+            forest = (
+                page
+                if page.page is Page.FOREST_HOME
+                else self.session.back(
+                    page, "forest-love-plant-leave", (Page.FOREST_HOME,)
+                )
+            )
             self.session.add_step("forest.water_love_plant", StepStatus.SUCCESS, "100g")
         else:
             self.session.add_step("forest.water_love_plant", StepStatus.NOT_AVAILABLE)
+        return forest
+
+    def _water_co_plant(self, forest: DetectedScreen) -> DetectedScreen:
         forest = self._locate_carousel(forest, "co_plant")
         if forest.element("co_plant"):
             page = self.session.tap(forest, "co_plant", "forest-co-plant-open", (Page.FOREST_CO_PLANT,))
             page = self.session.tap(page, "water", "forest-co-plant-amount", (Page.FOREST_CO_PLANT,))
-            page = self.session.tap(
-                page, "confirm", "forest-co-plant-confirm", (Page.FOREST_CO_PLANT,), irreversible=True,
+            self.session.begin_step(
+                "forest.water_co_plant", "about to submit 520g watering"
             )
-            forest = self.session.back(page, "forest-co-plant-leave", (Page.FOREST_HOME,))
+            page = self.session.tap(
+                page,
+                "confirm",
+                "forest-co-plant-confirm",
+                (Page.FOREST_CO_PLANT, Page.FOREST_HOME),
+                irreversible=True,
+            )
+            forest = (
+                page
+                if page.page is Page.FOREST_HOME
+                else self.session.back(
+                    page, "forest-co-plant-leave", (Page.FOREST_HOME,)
+                )
+            )
             self.session.add_step("forest.water_co_plant", StepStatus.SUCCESS, "520g")
         else:
             self.session.add_step("forest.water_co_plant", StepStatus.NOT_AVAILABLE)
@@ -243,7 +324,14 @@ class ForestWorkflow:
             start = rain.element("start")
             if start is None:
                 raise AutomationError(f"Energy rain round {round_number} has no start action")
-            stats = self.rain.play(self.session.device, start.center)
+            round_step = f"forest.energy_rain.round_{round_number}"
+            self.session.begin_step(round_step, "about to consume energy-rain round")
+            stats = self.rain.play(
+                self.session.device,
+                start.center,
+                self.session.run_directory / "energy-rain-replay",
+                f"round-{round_number}",
+            )
             rounds.append(stats)
             result = self.session.wait_for(
                 (Page.ENERGY_RAIN_GIFT, Page.ENERGY_RAIN_RESULT),
@@ -272,6 +360,11 @@ class ForestWorkflow:
                 )
             else:
                 forest = self.session.back(result, "energy-rain-leave", (Page.FOREST_HOME,))
+            self.session.add_step(
+                round_step,
+                StepStatus.SUCCESS,
+                f"estimated hit rate {stats.hit_rate:.1%}",
+            )
         self.session.add_step(
             "forest.energy_rain",
             StepStatus.SUCCESS,

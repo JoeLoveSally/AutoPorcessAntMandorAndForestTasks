@@ -38,7 +38,13 @@ class ManorWorkflow:
             f"rewarded {rewarded}",
         )
         if manor.element("find_chicken"):
-            friend = self.session.tap(manor, "find_chicken", "manor-find-chicken")
+            friend = self.session.tap(
+                manor,
+                "find_chicken",
+                "manor-find-chicken",
+                (Page.MANOR_HOME,),
+                required_after=("bring_home",),
+            )
             if friend.element("bring_home"):
                 manor = self.session.tap(friend, "bring_home", "manor-bring-chicken-home", (Page.MANOR_HOME,))
             else:
@@ -48,6 +54,14 @@ class ManorWorkflow:
             self.session.add_step("manor.bring_chicken_home", StepStatus.NOT_AVAILABLE)
         if manor.element("diary"):
             diary = self.session.tap(manor, "diary", "manor-open-diary", (Page.MANOR_DIARY,))
+            if diary.element("skip_tutorial"):
+                diary = self.session.tap(
+                    diary,
+                    "skip_tutorial",
+                    "manor-diary-skip-tutorial",
+                    (Page.MANOR_DIARY,),
+                    forbidden_after=("skip_tutorial",),
+                )
             if diary.element("attach"):
                 diary = self.session.tap(
                     diary,
@@ -74,6 +88,13 @@ class ManorWorkflow:
 
     def _family_tasks(self, manor: DetectedScreen) -> DetectedScreen:
         family = self.session.tap(manor, "family", "family-open", (Page.MANOR_FAMILY, Page.MANOR_FAMILY_TASKS))
+        if family.page is Page.MANOR_FAMILY:
+            # The family page rotates speech bubbles over the central sign-in
+            # control. Template recognition can therefore alternate between
+            # ``sign_in`` and the layout fallback ``tasks`` even though both
+            # lead to the same task panel. Re-plan from one fresh observation
+            # instead of carrying the entry classification across the cycle.
+            family = self.session.observe("family-entry-settle")
         if family.page is Page.MANOR_FAMILY and family.element("sign_in"):
             tasks = self.session.tap(family, "sign_in", "family-sign-in", (Page.MANOR_FAMILY_TASKS,))
             self.session.add_step("family.sign_in", StepStatus.SUCCESS)
@@ -109,6 +130,9 @@ class ManorWorkflow:
         projects = self.session.tap(tasks, "donate", "donation-open", (Page.MANOR_DONATION_PROJECTS,))
         detail = self.session.tap(projects, "first_project", "donation-first-project", (Page.MANOR_DONATION_DETAIL,))
         confirm = self.session.tap(detail, "donate_now", "donation-open-confirm", (Page.MANOR_DONATION_CONFIRM,))
+        self.session.begin_step(
+            "family.donate_egg", "about to submit one irreversible egg donation"
+        )
         success = self.session.tap(
             confirm,
                 "confirm_donation",
@@ -121,6 +145,11 @@ class ManorWorkflow:
         self.session.device.back()
         manor = self.session.wait_for(Page.MANOR_HOME, "donation-return-manor")
         family = self.session.tap(manor, "family", "family-reopen", (Page.MANOR_FAMILY,))
+        family = self.session.observe("family-reopen-settle")
+        if family.page is not Page.MANOR_FAMILY:
+            raise AutomationError(
+                f"Donation returned to unexpected family context: {family.page.value}"
+            )
         tasks = self.session.tap(family, "tasks", "family-reopen-tasks", (Page.MANOR_FAMILY_TASKS,))
         if not tasks.element("donation_done"):
             raise AutomationError("Donation returned without the (1/1) completion marker")
@@ -145,6 +174,7 @@ class ManorWorkflow:
         key = "confirm" if confirm.element("confirm") else None
         if key is None:
             raise AutomationError(f"{step_name} confirmation is missing")
+        self.session.begin_step(step_name, "about to submit irreversible confirmation")
         after = self.session.tap(
             confirm, key, action_name, (Page.MANOR_FAMILY_TASKS,), irreversible=True,
         )
@@ -166,7 +196,13 @@ class ManorWorkflow:
                 self.session.add_step(f"feed.lottery_{index + 1}", StepStatus.NOT_AVAILABLE)
                 continue
             lottery = self.session.tap(tasks, key, f"feed-lottery-{index + 1}-open", (Page.LOTTERY,))
-            lottery = self.lottery.run(lottery, f"feed-lottery-{index + 1}")
+            lottery = self.lottery.run(
+                lottery,
+                f"feed-lottery-{index + 1}",
+                reenter=lambda key=key, index=index: self._reenter_feed_lottery(
+                    key, index
+                ),
+            )
             tasks = self.session.back(lottery, f"feed-lottery-{index + 1}-leave", (Page.MANOR_FEED_TASKS,))
         for key, name, claim_to_refresh in (
             ("farm", "feed.baba_farm", False),
@@ -200,6 +236,7 @@ class ManorWorkflow:
                 tasks = self.external.run(
                     tasks, key, name.replace(".", "-"), Page.MANOR_FEED_TASKS,
                     swipe_to_progress=False, immediate_return=True,
+                    reenter=self._reenter_feed_tasks,
                 )
             if claim_to_refresh:
                 tasks = self._locate_feed(tasks, key, required=False)
@@ -213,7 +250,9 @@ class ManorWorkflow:
         if not tasks.element("daily_claim"):
             self.session.add_step("feed.daily_claim", StepStatus.ALREADY_DONE)
             return tasks
-        after = self.session.tap(tasks, "daily_claim", "feed-daily-claim")
+        after = self.session.tap(
+            tasks, "daily_claim", "feed-daily-claim", (Page.MANOR_FEED_TASKS,)
+        )
         if after.element("confirm_overflow"):
             after = self.session.tap(after, "confirm_overflow", "feed-confirm-overflow", (Page.MANOR_FEED_TASKS,))
         if after.page is not Page.MANOR_FEED_TASKS:
@@ -243,6 +282,7 @@ class ManorWorkflow:
             question = max(candidates, key=len, default="")
         answer = self.quiz.solve(question, options[:2]) if len(options) >= 2 else None
         index = answer.option_index if answer else self.session.config.quiz.fallback_option
+        self.session.begin_step("feed.quiz", f"about to submit option {index + 1}")
         result = self.session.tap(page, f"option_{index}", "quiz-answer", (Page.MANOR_QUIZ_RESULT,))
         tasks = self.session.back(result, "quiz-leave", (Page.MANOR_FEED_TASKS,))
         self.session.add_step(
@@ -265,6 +305,7 @@ class ManorWorkflow:
                 Page.MANOR_FEED_TASKS,
                 swipe_to_progress=swipe,
                 timeout_seconds=45,
+                reenter=self._reenter_feed_tasks,
             )
         except AutomationError:
             if (
@@ -283,9 +324,42 @@ class ManorWorkflow:
                 Page.MANOR_FEED_TASKS,
                 swipe_to_progress=False,
                 timeout_seconds=45,
+                reenter=self._reenter_feed_tasks,
             )
         self.session.add_step(name, StepStatus.SUCCESS)
         return tasks
+
+    def _reenter_feed_tasks(self) -> DetectedScreen:
+        """Rebuild the feed-list context from a verified parent page."""
+        current = self.session.current
+        if current is None:
+            raise AutomationError("Cannot re-enter feed tasks without a current page")
+        if current.page is Page.MANOR_FEED_TASKS:
+            return current
+        if current.page is Page.ALIPAY_HOME:
+            current = self.session.tap(
+                current, "manor", "feed-reenter-manor", (Page.MANOR_HOME,)
+            )
+        if current.page is not Page.MANOR_HOME:
+            raise AutomationError(
+                f"Cannot re-enter feed tasks from {current.page.value}"
+            )
+        return self.session.tap(
+            current,
+            "feed_tasks",
+            "feed-reenter-task-list",
+            (Page.MANOR_FEED_TASKS,),
+        )
+
+    def _reenter_feed_lottery(self, key: str, index: int) -> DetectedScreen:
+        tasks = self._reenter_feed_tasks()
+        tasks = self._locate_feed(tasks, key)
+        return self.session.tap(
+            tasks,
+            key,
+            f"feed-lottery-{index + 1}-reenter",
+            (Page.LOTTERY,),
+        )
 
     def _baba_farm(self, tasks):
         # Spec: 支付宝每日任务文字描述.txt line 67. Opening the farm auto-
@@ -325,13 +399,25 @@ class ManorWorkflow:
 
     def _baba_farm_tasks(self, farm):
         if farm.element("daily_sign_claim"):
-            farm = self.session.tap(farm, "daily_sign_claim", "baba-tasks-daily-sign")
+            farm = self.session.tap(
+                farm,
+                "daily_sign_claim",
+                "baba-tasks-daily-sign",
+                (Page.BABA_FARM_TASKS,),
+                forbidden_after=("daily_sign_claim",),
+            )
         farm = self._locate_in_page(
             farm, "chicken_feed_claim", Page.BABA_FARM_TASKS,
             "baba-tasks-chicken-feed", required=False,
         )
         if farm.element("chicken_feed_claim"):
-            farm = self.session.tap(farm, "chicken_feed_claim", "baba-tasks-chicken-feed")
+            farm = self.session.tap(
+                farm,
+                "chicken_feed_claim",
+                "baba-tasks-chicken-feed",
+                (Page.BABA_FARM_TASKS,),
+                forbidden_after=("chicken_feed_claim",),
+            )
         if farm.element("close"):
             farm = self.session.tap(farm, "close", "baba-tasks-close", (Page.BABA_FARM,))
         return farm
@@ -386,17 +472,33 @@ class ManorWorkflow:
         kitchen = self.session.tap(tasks, "kitchen", "kitchen-open", (Page.CHICKEN_KITCHEN,))
         for key in ("daily_ingredient", "claim_ingredient"):
             if kitchen.element(key):
-                kitchen = self.session.tap(kitchen, key, f"kitchen-{key}")
+                kitchen = self.session.tap(
+                    kitchen,
+                    key,
+                    f"kitchen-{key}",
+                    (Page.CHICKEN_KITCHEN,),
+                    forbidden_after=(key,),
+                )
         if kitchen.element("donate_shop"):
             kitchen = self._kitchen_donate(kitchen)
         for index in range(2):
             if not kitchen.element("cook"):
                 raise AutomationError("Kitchen cook action disappeared before two meals")
-            kitchen = self.session.tap(kitchen, "cook", f"kitchen-cook-{index + 1}", irreversible=True)
+            cook_step = f"feed.kitchen.cook_{index + 1}"
+            self.session.begin_step(cook_step, "about to consume ingredients")
+            kitchen = self.session.tap(
+                kitchen,
+                "cook",
+                f"kitchen-cook-{index + 1}",
+                (Page.CHICKEN_KITCHEN,),
+                required_after=("close",),
+                irreversible=True,
+            )
             if kitchen.element("close"):
                 kitchen = self.session.tap(
                     kitchen, "close", f"kitchen-close-book-{index + 1}", (Page.CHICKEN_KITCHEN,)
                 )
+            self.session.add_step(cook_step, StepStatus.SUCCESS)
         self.session.device.back()
         return self.session.wait_for(Page.MANOR_FEED_TASKS, "kitchen-return")
 

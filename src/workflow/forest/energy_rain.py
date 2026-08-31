@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
 import math
+import queue
+import threading
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -65,7 +70,13 @@ class EnergyRainPlayer:
         self.config = config
         self.logger = logger
 
-    def play(self, device, start_point: tuple[int, int] | None = None) -> EnergyRainStats:
+    def play(
+        self,
+        device,
+        start_point: tuple[int, int] | None = None,
+        artifacts_directory: Path | None = None,
+        round_name: str = "round",
+    ) -> EnergyRainStats:
         started = time.monotonic()
         deadline = started + self.config.realtime.rain_duration_seconds
         tracks: dict[int, Track] = {}
@@ -74,6 +85,12 @@ class EnergyRainPlayer:
         taps = 0
         frame_times: list[float] = []
         last_targets = started
+        diagnostics = artifacts_directory / round_name if artifacts_directory else None
+        if diagnostics is not None:
+            diagnostics.mkdir(parents=True, exist_ok=True)
+        diagnostic_context = (
+            _DiagnosticWriter(diagnostics) if diagnostics is not None else nullcontext()
+        )
         with (
             AdbScreenrecordFrameStream(
                 device.serial,
@@ -82,6 +99,7 @@ class EnergyRainPlayer:
                 bit_rate=self.config.realtime.bit_rate,
             ) as stream,
             PersistentAdbTouch(device.serial, self.config.device.adb_path) as touch,
+            diagnostic_context as diagnostic_writer,
         ):
             # Start only after the video and touch channels are ready, so the
             # three-second countdown is available for decoder warm-up.
@@ -180,6 +198,7 @@ class EnergyRainPlayer:
                 # every object from one frame builds a stale coordinate queue;
                 # send only the two lowest (most urgent) balls, then recompute
                 # the rest from the next video frame.
+                frame_taps: list[tuple[int, int]] = []
                 for _urgency, track, local in sorted(eligible, reverse=True)[:2]:
                     if not _safe_tap_point(local, frame.image.shape[1], frame.image.shape[0]):
                         continue
@@ -194,6 +213,19 @@ class EnergyRainPlayer:
                     )
                     track.tapped_at = time.monotonic()
                     taps += 1
+                    frame_taps.append(local)
+                if diagnostic_writer is not None and (
+                    frame.sequence % self.config.realtime.diagnostic_frame_interval == 0
+                    or frame_taps
+                ):
+                    diagnostic_writer.submit(
+                        frame.sequence,
+                        frame.captured_at,
+                        frame.image,
+                        detections,
+                        frame_taps,
+                        game_frame,
+                    )
                 if game_seen and tracks and time.monotonic() - last_targets > 1.8 and time.monotonic() - started > 10:
                     break
         now = time.monotonic()
@@ -262,3 +294,102 @@ def _safe_tap_point(point: tuple[int, int], width: int, height: int) -> bool:
     # The menu hit target is wider than the three visible dots. A ball that
     # enters this strip is allowed to fall below it before being tapped.
     return not (x >= width * 0.86 and y <= height * 0.14)
+
+
+def _save_diagnostic_frame(
+    directory: Path,
+    sequence: int,
+    captured_at: float,
+    image: np.ndarray,
+    detections: list[tuple[int, int]],
+    taps: list[tuple[int, int]],
+    game_frame: bool,
+) -> None:
+    """Persist a bounded replay sample and its exact detection/tap metadata."""
+    annotated = image.copy()
+    for point in detections:
+        cv2.circle(annotated, point, 12, (0, 255, 255), 3)
+    for point in taps:
+        cv2.drawMarker(
+            annotated,
+            point,
+            (0, 0, 255),
+            cv2.MARKER_CROSS,
+            34,
+            4,
+        )
+    image_name = f"frame-{sequence:06d}.jpg"
+    cv2.imwrite(
+        str(directory / image_name),
+        annotated,
+        (cv2.IMWRITE_JPEG_QUALITY, 82),
+    )
+    record = {
+        "frame": sequence,
+        "captured_at": captured_at,
+        "game_frame": game_frame,
+        "detections": detections,
+        "taps": taps,
+        "image": image_name,
+    }
+    with (directory / "frames.jsonl").open("a", encoding="utf-8", newline="\n") as stream:
+        stream.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+
+
+class _DiagnosticWriter:
+    """Write replay samples off the real-time detection thread.
+
+    The queue is deliberately bounded: diagnostic evidence may be dropped
+    under I/O pressure, but gameplay latency must never increase because the
+    disk cannot keep up.
+    """
+
+    def __init__(self, directory: Path, capacity: int = 8):
+        self.directory = directory
+        self.items: queue.Queue[tuple | None] = queue.Queue(maxsize=capacity)
+        self.worker = threading.Thread(
+            target=self._run,
+            name="energy-rain-diagnostics",
+            daemon=True,
+        )
+
+    def __enter__(self):
+        self.worker.start()
+        return self
+
+    def __exit__(self, *_exc_info):
+        self.items.put(None)
+        self.worker.join(timeout=10)
+
+    def submit(
+        self,
+        sequence: int,
+        captured_at: float,
+        image: np.ndarray,
+        detections: list[tuple[int, int]],
+        taps: list[tuple[int, int]],
+        game_frame: bool,
+    ) -> None:
+        item = (
+            sequence,
+            captured_at,
+            image.copy(),
+            list(detections),
+            list(taps),
+            game_frame,
+        )
+        try:
+            self.items.put_nowait(item)
+        except queue.Full:
+            return
+
+    def _run(self) -> None:
+        while True:
+            item = self.items.get()
+            if item is None:
+                return
+            try:
+                _save_diagnostic_frame(self.directory, *item)
+            except Exception:
+                # Diagnostics are best-effort and must never abort a round.
+                continue

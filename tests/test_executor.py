@@ -20,9 +20,10 @@ from domain_data import (
 
 
 class _Device:
-    def __init__(self):
+    def __init__(self, activity: str = "Activity"):
         self.taps: list[tuple[int, int]] = []
         self.swipes: list[tuple[tuple[int, int], tuple[int, int], int]] = []
+        self.activity = activity
 
     def size(self):
         return Size(1440, 3200)
@@ -37,7 +38,7 @@ class _Device:
         self.swipes.append((start, end, duration_ms))
 
     def current_package_activity(self):
-        return "com.eg.android.AlipayGphone", "Activity"
+        return "com.eg.android.AlipayGphone", self.activity
 
 
 class _Collector:
@@ -130,6 +131,59 @@ def test_expected_page_gets_short_confirmation_window():
     assert observed is expected
 
 
+def test_unstable_expected_page_must_be_confirmed_before_it_is_accepted():
+    screen, after = _screen(())
+    unstable_observation = replace(
+        _observation(),
+        errors=("unstable_observation:page changed during capture",),
+    )
+    unstable = DetectedScreen(Page.FOREST_LOVE_PLANT, unstable_observation)
+    stable = DetectedScreen(Page.FOREST_LOVE_PLANT, _observation())
+    executor = ActionExecutor(
+        _Device(),
+        _Collector(after),
+        _Detector(after, [unstable, stable]),
+        _Logger(),
+        None,
+        "com.eg.android.AlipayGphone",
+        settle_seconds=0.0,
+    )
+
+    result, observed = executor.execute(
+        screen,
+        Action("open-love-plant", ActionKind.TAP, "love_plant"),
+        expected_pages=(Page.FOREST_LOVE_PLANT,),
+    )
+
+    assert result.status is ActionStatus.EXECUTED
+    assert observed is stable
+
+
+def test_changed_activity_rejects_stale_coordinates_before_touch():
+    screen, after = _screen(())
+    device = _Device(activity="OtherActivity")
+    executor = ActionExecutor(
+        device,
+        _Collector(after),
+        _Detector(after),
+        _Logger(),
+        None,
+        "com.eg.android.AlipayGphone",
+        settle_seconds=0.0,
+    )
+
+    result, observed = executor.execute(
+        screen,
+        Action("open-love-plant", ActionKind.TAP, "love_plant"),
+    )
+
+    assert result.status is ActionStatus.REJECTED
+    assert result.point is None
+    assert "Activity changed" in (result.error or "")
+    assert observed is None
+    assert device.taps == []
+
+
 def _promo_overlay() -> Overlay:
     close = Element("close", Bounds(652, 2664, 792, 2804), "obs-1", "关闭")
     return Overlay(OverlayType.PROMO, {"close": close}, ("cv:modal_scrim",), 0.9)
@@ -199,7 +253,11 @@ def test_animated_friend_page_allows_only_safe_advance_swipe():
         errors=("unstable_observation:page changed during capture",),
     )
     friend = DetectedScreen(Page.FOREST_FRIEND, observation)
-    after = DetectedScreen(Page.FOREST_FRIEND, _observation())
+    after_observation = replace(
+        _observation(),
+        errors=("unstable_observation:friend transition",),
+    )
+    after = DetectedScreen(Page.FOREST_FRIEND, after_observation)
     executor = _executor(friend, after)
 
     result, observed = executor.execute(
@@ -211,8 +269,45 @@ def test_animated_friend_page_allows_only_safe_advance_swipe():
             end=(720, 960),
             duration_ms=450,
         ),
+        expected_pages=(
+            Page.FOREST_FRIEND,
+            Page.FOREST_TREASURE,
+            Page.FOREST_HOME,
+        ),
     )
 
     assert result.status is ActionStatus.EXECUTED
     assert observed is after
     assert executor.device.swipes == [((720, 2432), (720, 960), 450)]
+
+
+def test_find_energy_accepts_identified_but_animating_first_friend():
+    screen, _after = _screen(())
+    screen = DetectedScreen(
+        Page.FOREST_HOME,
+        screen.observation,
+        {"find_energy": Element("find_energy", Bounds(1100, 1800, 1400, 2200), screen.observation.id)},
+    )
+    friend_observation = replace(
+        _observation(),
+        errors=("unstable_observation:friend transition",),
+    )
+    friend = DetectedScreen(Page.FOREST_FRIEND, friend_observation)
+    executor = ActionExecutor(
+        _Device(),
+        _Collector(friend),
+        _Detector(friend),
+        _Logger(),
+        None,
+        "com.eg.android.AlipayGphone",
+        settle_seconds=0.0,
+    )
+
+    result, observed = executor.execute(
+        screen,
+        Action("forest-find-energy", ActionKind.TAP, "find_energy"),
+        expected_pages=(Page.FOREST_FRIEND, Page.FOREST_TREASURE, Page.FOREST_HOME),
+    )
+
+    assert result.status is ActionStatus.EXECUTED
+    assert observed is friend

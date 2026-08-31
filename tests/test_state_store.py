@@ -15,6 +15,18 @@ def test_step_upsert_and_latest(tmp_path: Path):
     assert latest.observation_id == "after"
 
 
+def test_incomplete_steps_only_returns_latest_unresolved_records(tmp_path: Path):
+    store = StateStore(tmp_path / "state.db")
+    store.save_step("run-1", "daily", "donate", StepStatus.IN_PROGRESS)
+    store.save_step("run-2", "daily", "donate", StepStatus.SUCCESS)
+    store.save_step("run-2", "daily", "water", StepStatus.IN_PROGRESS)
+    store.save_step("run-2", "forest", "rain", StepStatus.IN_PROGRESS)
+
+    incomplete = store.incomplete_steps("daily")
+
+    assert [item.step for item in incomplete] == ["water"]
+
+
 def test_process_lock_is_exclusive(tmp_path: Path):
     store = StateStore(tmp_path / "state.db")
     assert store.acquire_lock("daily", "one")

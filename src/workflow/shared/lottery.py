@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from domain_data import DetectedScreen, Page
+from collections.abc import Callable
+
+from domain_data import DetectedScreen, Page, StepStatus
 from runtime.errors import AutomationError
 from workflow.session import WorkflowSession
 from workflow.shared.external import ExternalTaskRunner
@@ -19,20 +21,34 @@ class LotteryRunner:
         page_type: Page = Page.LOTTERY,
         store_repetitions: int = 3,
         exchange_feed: bool = True,
+        reenter: Callable[[], DetectedScreen] | None = None,
     ) -> DetectedScreen:
         current = page
         if current.page is not page_type:
             raise AutomationError(f"{name} started on {current.page.value}")
         current = self._locate(current, ("sign", "draw"), name, required=False)
         if current.element("sign"):
-            current = self.session.tap(current, "sign", f"{name}-daily-sign")
+            current = self.session.tap(
+                current,
+                "sign",
+                f"{name}-daily-sign",
+                (page_type,),
+                reenter=reenter,
+                forbidden_after=("sign",),
+            )
             if current.page is not page_type:
                 current = self.session.wait_for(page_type, f"{name}-after-sign")
         completed = 0
         while completed < store_repetitions:
             current = self._locate(current, ("store", "claim"), name, required=False)
             if current.element("claim") and not current.element("store"):
-                current = self.session.tap(current, "claim", f"{name}-claim-{completed + 1}")
+                current = self.session.tap(
+                    current,
+                    "claim",
+                    f"{name}-claim-{completed + 1}",
+                    (page_type,),
+                    reenter=reenter,
+                )
                 completed += 1
                 continue
             if not current.element("store"):
@@ -44,23 +60,65 @@ class LotteryRunner:
                 page_type,
                 swipe_to_progress=True,
                 timeout_seconds=50,
+                reenter=reenter,
             )
             current = self._locate(current, ("claim",), name)
-            current = self.session.tap(current, "claim", f"{name}-claim-{completed + 1}")
+            current = self.session.tap(
+                current,
+                "claim",
+                f"{name}-claim-{completed + 1}",
+                (page_type,),
+                reenter=reenter,
+            )
             completed += 1
         if exchange_feed:
             current = self._locate(current, ("exchange", "draw"), name, required=False)
             if current.element("exchange"):
-                current = self.session.tap(current, "exchange", f"{name}-exchange")
+                current = self.session.tap(
+                    current,
+                    "exchange",
+                    f"{name}-exchange",
+                    (page_type,),
+                    reenter=reenter,
+                )
                 if current.element("confirm_exchange") or current.element("confirm"):
                     key = "confirm_exchange" if current.element("confirm_exchange") else "confirm"
-                    current = self.session.tap(current, key, f"{name}-confirm-exchange")
+                    exchange_step = f"{name}.exchange"
+                    self.session.begin_step(exchange_step, "about to submit feed exchange")
+                    current = self.session.tap(
+                        current,
+                        key,
+                        f"{name}-confirm-exchange",
+                        (page_type,),
+                        forbidden_after=(key,),
+                        irreversible=True,
+                        reenter=reenter,
+                    )
+                    self.session.add_step(exchange_step, StepStatus.SUCCESS)
         current = self._locate(current, ("draw",), name)
-        current = self.session.tap(current, "draw", f"{name}-draw")
+        draw_step = f"{name}.draw"
+        self.session.begin_step(draw_step, "about to consume one draw opportunity")
+        current = self.session.tap(
+            current,
+            "draw",
+            f"{name}-draw",
+            (page_type,),
+            required_after=("close_reward",),
+            irreversible=True,
+            reenter=reenter,
+        )
         if current.element("close_reward"):
-            current = self.session.tap(current, "close_reward", f"{name}-close-reward")
+            current = self.session.tap(
+                current,
+                "close_reward",
+                f"{name}-close-reward",
+                (page_type,),
+                forbidden_after=("close_reward",),
+                reenter=reenter,
+            )
         elif current.page is not page_type:
             current = self.session.wait_for(page_type, f"{name}-after-reward")
+        self.session.add_step(draw_step, StepStatus.SUCCESS)
         return current
 
     def _locate(

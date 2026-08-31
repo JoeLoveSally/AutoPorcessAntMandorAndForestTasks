@@ -2,9 +2,12 @@ import cv2
 import numpy as np
 
 from screen_perception.vision import (
+    detect_co_plant_water_button,
     detect_green_energy_balls,
+    detect_love_plant_reward_button,
     detect_love_plant_controls,
     detect_modal_scrim,
+    detect_treasure_draw_button,
     detect_yellow_right_button,
 )
 
@@ -45,6 +48,24 @@ def test_detects_right_side_one_click_button():
     assert point is not None
     assert point[0] > 390
     assert 590 < point[1] < 620
+
+
+def test_detects_treasure_bottom_centre_draw_button():
+    image = np.zeros((3200, 1440, 3), dtype=np.uint8)
+    cv2.rectangle(image, (396, 2417), (1053, 2627), (0, 220, 255), -1)
+
+    point = detect_treasure_draw_button(encode(image))
+
+    assert point is not None
+    assert abs(point[0] - 724) <= 4
+    assert abs(point[1] - 2522) <= 4
+
+
+def test_treasure_draw_ignores_full_width_yellow_ground():
+    image = np.zeros((3200, 1440, 3), dtype=np.uint8)
+    cv2.rectangle(image, (0, 2380), (1440, 2900), (0, 220, 255), -1)
+
+    assert detect_treasure_draw_button(encode(image)) is None
 
 
 def test_tree_energy_ignores_small_icon_and_far_right_promotion():
@@ -96,6 +117,28 @@ def test_love_plant_finds_centre_purple_pill():
     assert abs(x - 720) <= 4
     assert abs(y - 1599) <= 4
     assert confidence == 0.88
+
+
+def test_love_plant_reward_finds_lower_acknowledgement_pill():
+    image = np.full((3200, 1440, 3), 22, dtype=np.uint8)
+    cv2.ellipse(image, (720, 2307), (302, 75), 0, 0, 360, (215, 80, 190), -1)
+
+    point = detect_love_plant_reward_button(encode(image))
+
+    assert point is not None
+    assert abs(point[0] - 720) <= 4
+    assert abs(point[1] - 2307) <= 4
+
+
+def test_co_plant_finds_lower_right_blue_watering_action():
+    image = np.full((3200, 1440, 3), (250, 205, 180), dtype=np.uint8)
+    cv2.circle(image, (1240, 3000), 120, (245, 160, 25), -1)
+
+    point = detect_co_plant_water_button(encode(image))
+
+    assert point is not None
+    assert abs(point[0] - 1240) <= 4
+    assert abs(point[1] - 3000) <= 4
 
 
 def test_love_plant_ignores_small_purple_decorations():

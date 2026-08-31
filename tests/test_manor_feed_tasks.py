@@ -64,7 +64,16 @@ class ScriptedSession:
             raise AssertionError("script exhausted; workflow asked for another screen")
         return self._script.pop(0)
 
-    def tap(self, screen, key, name, expected=(), required_after=(), irreversible=False):
+    def tap(
+        self,
+        screen,
+        key,
+        name,
+        expected=(),
+        required_after=(),
+        irreversible=False,
+        **_contract,
+    ):
         self.taps.append((key, expected))
         self.current = self._next()
         return self.current
@@ -100,6 +109,9 @@ class ScriptedSession:
         return self.current
 
     def add_step(self, *args):
+        pass
+
+    def begin_step(self, *args):
         pass
 
 

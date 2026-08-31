@@ -7,12 +7,15 @@ from domain_data import Bounds, DetectedScreen, Element, Observation, Overlay, O
 from screen_perception.ui_tree import UiTree
 from screen_perception.vision import (
     detect_chicken_kitchen_controls,
+    detect_co_plant_water_button,
     detect_family_task_controls,
     detect_green_energy_balls,
     detect_kitchen_donate_controls,
+    detect_love_plant_reward_button,
     detect_love_plant_controls,
     detect_manor_home_controls,
     detect_modal_scrim,
+    detect_treasure_draw_button,
     detect_yellow_right_button,
     match_template,
 )
@@ -128,6 +131,19 @@ class ScreenDetector:
         )
 
     def _external(self, observation, tree, labels, overlays):
+        # Alipay's short-video task runs in a dedicated native Activity while
+        # accessibility may keep exposing the feed-list WebView underneath.
+        # The Activity is therefore the authoritative page boundary; using
+        # the stale DOM here would falsely classify the live video as the
+        # source task list.
+        if (observation.activity or "").endswith("LivingDetailActivity"):
+            return DetectedScreen(
+                Page.EXTERNAL_BROWSE,
+                observation,
+                overlays=overlays,
+                evidence=("activity:LivingDetailActivity",),
+                confidence=0.98,
+            )
         if tree is None:
             return None
         # Generic task-card descriptions such as "浏览15秒" remain visible in
@@ -149,8 +165,11 @@ class ScreenDetector:
     def _alipay_home(self, observation, tree, labels, overlays):
         if tree is None:
             return None
-        manor = tree.element(observation.id, "manor", "蚂蚁庄园", fragment=True)
-        forest = tree.element(observation.id, "forest", "蚂蚁森林", fragment=True)
+        # Home shortcuts expose exact labels. Fragment matching lets a Manor
+        # title plus a feed task such as "蚂蚁森林十周年" impersonate the two
+        # shortcuts while the feed panel is visibly open.
+        manor = tree.element(observation.id, "manor", "蚂蚁庄园")
+        forest = tree.element(observation.id, "forest", "蚂蚁森林")
         if not (manor and forest):
             return None
         return DetectedScreen(
@@ -217,6 +236,26 @@ class ScreenDetector:
                 tree,
                 overlays,
                 {"first_project": ("去捐蛋",)},
+            )
+        # The first visit to 小鸡日记 shows a three-step tutorial scrim.  The
+        # underlying diary content is already present, so model it as the
+        # diary page with an explicit Skip control instead of UNKNOWN.  This
+        # was the actual cause of the August 29 "diary got unknown" failures;
+        # the home-page coordinate had opened the correct destination.
+        if (
+            _visible(tree, "名字")
+            and _visible(tree, "体重")
+            and _visible(tree, "状态")
+            and _visible(tree, "点赞")
+            and _visible(tree, "跳过")
+            and _has(joined, "模版/", "快乐法则")
+        ):
+            return self._screen(
+                Page.MANOR_DIARY,
+                observation,
+                tree,
+                overlays,
+                {"skip_tutorial": ("跳过",)},
             )
         if observation.screenshot:
             diary_page = self.template_directory / "diary_page.png"
@@ -468,6 +507,13 @@ class ScreenDetector:
         if tree is None:
             return None
         joined = " ".join(labels)
+        # A feed-list task may mention the anniversary campaign but remains a
+        # Manor panel. Let the Manor detector own that explicit container.
+        if _has(joined, "饲料任务"):
+            return None
+        forest_home_structure = _visible(tree, "切换为个人版") and _visible(
+            tree, "森林广场"
+        ) and _visible(tree, "森林动态")
         # When no collectible friend remains, 找能量 can route to an Alipay
         # membership task page.  It still contains 蚂蚁森林 and green Canvas
         # decorations, but is not the forest home.  Keep it UNKNOWN so the
@@ -480,6 +526,18 @@ class ScreenDetector:
                 observation,
                 overlays=overlays,
                 evidence=("ui:支付宝会员签到", "not:forest_home"),
+            )
+        if (
+            _visible(tree, "蚂蚁森林")
+            and _visible(tree, *_CAMPAIGN_MARKERS)
+            and not forest_home_structure
+        ):
+            return DetectedScreen(
+                Page.FOREST_CAMPAIGN,
+                observation,
+                overlays=overlays,
+                evidence=("ui:anniversary_campaign",),
+                confidence=0.96,
             )
         if _has(joined, "我的活力值") and _visible(tree, "关闭奖励弹窗"):
             return self._screen(Page.FOREST_SIGN_REWARD, observation, tree, overlays, {
@@ -507,6 +565,24 @@ class ScreenDetector:
         # fragments such as 累计一起攒能量 would win over the real button, so
         # the purple-pill signature is the only source for it.
         if _visible(tree, "真爱合种") and observation.screenshot:
+            if point := detect_love_plant_reward_button(observation.screenshot):
+                x, y, confidence = point
+                return DetectedScreen(
+                    Page.FOREST_LOVE_PLANT,
+                    observation,
+                    {
+                        "close_reward": _point_element(
+                            observation,
+                            "close_reward",
+                            (x, y),
+                            "cv:love_plant_reward_button",
+                            confidence,
+                        )
+                    },
+                    overlays,
+                    ("ui:真爱合种", "cv:love_plant_reward_button"),
+                    0.92,
+                )
             if controls := detect_love_plant_controls(observation.screenshot):
                 elements = {
                     key: _point_element(
@@ -526,10 +602,57 @@ class ScreenDetector:
             return self._screen(Page.FOREST_CO_PLANT, observation, tree, overlays, {
                 "water": ("浇水",), "confirm": ("浇水",),
             })
-        if _visible(tree, "森林寻宝") and _visible(tree, "立即抽奖"):
-            return self._screen(Page.FOREST_TREASURE, observation, tree, overlays, {
-                "enter_lottery": ("立即抽奖",),
-            })
+        # The current co-plant main page is Canvas-only. Accessibility exposes
+        # its stable semantics (小树苗, TA是队长, 今日排行), but the large blue
+        # watering action itself only exists in the rendered frame.
+        if (
+            _visible(tree, "小树苗")
+            and _visible(tree, "TA是队长")
+            and _visible(tree, "今日排行")
+            and observation.screenshot
+        ):
+            if point := detect_co_plant_water_button(observation.screenshot):
+                x, y, confidence = point
+                return DetectedScreen(
+                    Page.FOREST_CO_PLANT,
+                    observation,
+                    {
+                        "water": _point_element(
+                            observation,
+                            "water",
+                            (x, y),
+                            "cv:co_plant_water_button",
+                            confidence,
+                        )
+                    },
+                    overlays,
+                    ("ui:小树苗", "cv:co_plant_water_button"),
+                    0.92,
+                )
+        if _visible(tree, "森林寻宝"):
+            if _visible(tree, "立即抽奖"):
+                return self._screen(Page.FOREST_TREASURE, observation, tree, overlays, {
+                    "enter_lottery": ("立即抽奖",),
+                })
+            if observation.screenshot:
+                if point := detect_treasure_draw_button(observation.screenshot):
+                    x, y, confidence = point
+                    return DetectedScreen(
+                        Page.FOREST_TREASURE,
+                        observation,
+                        {
+                            "enter_lottery": _point_element(
+                                observation,
+                                "enter_lottery",
+                                (x, y),
+                                "cv:treasure_draw_button",
+                                confidence,
+                            )
+                        },
+                        overlays,
+                        ("ui:森林寻宝", "cv:treasure_draw_button"),
+                        0.90,
+                    )
         if _visible(tree, "森林市集", "抽奖机会") and _visible(tree, "立即抽奖", "签到"):
             return self._lottery(Page.FOREST_LOTTERY, observation, tree, overlays)
         if _visible(tree, "TA待收的能量", "一键收"):
@@ -548,8 +671,8 @@ class ScreenDetector:
         # also contains 蚂蚁森林 (浇水给蚂蚁森林十年之约林); without this guard
         # it classifies as the forest home and every carousel swipe runs on the
         # wrong page.
-        if _visible(tree, "蚂蚁森林") and not _visible(
-            tree, *_CAMPAIGN_MARKERS
+        if _visible(tree, "蚂蚁森林") and (
+            forest_home_structure or not _visible(tree, *_CAMPAIGN_MARKERS)
         ):
             elements = self._elements(observation, tree, {
                 "find_energy": ("找能量",), "energy_rain": ("天天能量雨", "能量雨"),
@@ -654,13 +777,21 @@ class ScreenDetector:
             "forest_browse": ("去蚂蚁森林逛一逛",), "grain_browse": ("去芝麻攒粒攻略逛一逛",),
             "village_browse": ("去蚂蚁新村逛一逛",), "member_browse": ("去支付宝会员签到",),
         }
-        elements = self._elements(observation, tree, mapping)
+        # Task titles are descriptive, not safe action targets. Publish an
+        # entry only when ``task_action`` finds a distinct enabled control on
+        # the same row; completed rows must not fall back to clicking their
+        # title or ordinary reward claim.
+        elements: dict[str, Element] = {}
         daily_nodes = [
             node
             for node in tree.nodes
             if node.bounds.valid
             and node.searchable_text.startswith("领取")
             and "饲料" in node.searchable_text
+            # The five-day sign-in card is above the scrolling task rows.
+            # Completed task rewards use the same "领取N克饲料" label below
+            # this boundary and must remain untouched by design.
+            and node.bounds.bottom <= observation.height * 0.46
         ]
         if daily_nodes:
             node = max(daily_nodes, key=lambda item: item.bounds.left)
@@ -675,7 +806,10 @@ class ScreenDetector:
             )
         for key, fragments in mapping.items():
             if action := tree.task_action(observation.id, key, fragments):
-                elements[key] = action
+                if action.source == "ui_tree:task_action" and "领取" not in (
+                    action.text or ""
+                ):
+                    elements[key] = action
         lottery_nodes = [
             node
             for node in tree.nodes

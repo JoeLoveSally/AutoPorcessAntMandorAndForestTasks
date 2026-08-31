@@ -22,6 +22,7 @@ class RuntimeConfig:
     page_timeout_seconds: float = 15.0
     poll_interval_seconds: float = 0.5
     settle_seconds: float = 1.0
+    max_observation_age_seconds: float = 6.0
     max_recovery_attempts: int = 2
     max_task_iterations: int = 50
 
@@ -54,6 +55,7 @@ class RealtimeConfig:
     minimum_hit_rate: float = 0.80
     dedup_radius_pixels: int = 70
     track_ttl_seconds: float = 0.45
+    diagnostic_frame_interval: int = 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +105,9 @@ def load_config(path: Path) -> Config:
             page_timeout_seconds=float(runtime.get("page_timeout_seconds", 15.0)),
             poll_interval_seconds=float(runtime.get("poll_interval_seconds", 0.5)),
             settle_seconds=float(runtime.get("settle_seconds", 1.0)),
+            max_observation_age_seconds=float(
+                runtime.get("max_observation_age_seconds", 6.0)
+            ),
             max_recovery_attempts=int(runtime.get("max_recovery_attempts", 2)),
             max_task_iterations=int(runtime.get("max_task_iterations", 50)),
         ),
@@ -129,5 +134,8 @@ def load_config(path: Path) -> Config:
             minimum_hit_rate=minimum_hit_rate,
             dedup_radius_pixels=int(realtime.get("dedup_radius_pixels", 70)),
             track_ttl_seconds=float(realtime.get("track_ttl_seconds", 0.45)),
+            diagnostic_frame_interval=max(
+                1, int(realtime.get("diagnostic_frame_interval", 30))
+            ),
         ),
     )

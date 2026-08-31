@@ -199,7 +199,7 @@ class FakeRecovery:
         self.called = False
         self.allowed = None
 
-    def recover(self, screen, allowed_pages, reenter=None):
+    def recover(self, screen, allowed_pages, reenter=None, **_context):
         self.called = True
         self.allowed = allowed_pages
         return self.screen
@@ -466,7 +466,7 @@ def test_wait_for_raises_step_timeout_when_required_element_missing_after_recove
 def test_wait_for_propagates_recovery_budget_exhaustion():
     recovery = FakeRecovery(_screen(Page.MANOR_HOME))
 
-    def _raising(screen, allowed_pages, reenter=None):
+    def _raising(screen, allowed_pages, reenter=None, **_context):
         raise AutomationError("Recovery budget exhausted; latest=unknown")
 
     recovery.recover = _raising
