@@ -1,0 +1,7 @@
+serial = "10AD4419NX0029Z"
+adb = "adb"
+package = "com.eg.android.AlipayGphone"
+page_timeout = 25.0
+run_timeout = 2400.0
+max_scrolls = 16
+quiz_option = 0
