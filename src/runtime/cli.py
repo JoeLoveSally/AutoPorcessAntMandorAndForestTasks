@@ -15,6 +15,7 @@ from logger import Logger
 from runtime.store import Store
 from screen_perception import Observer
 from state_machine import Budget
+from state_machine.task_manager import TaskManager, TaskSpec, select_tasks
 
 
 def main():
@@ -32,6 +33,7 @@ def main():
     run = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
     logger = Logger(root, run)
     store = None
+    manager = None
     try:
         store = Store(root / "runtime", serial, run)
         device = Device(serial, config.get("adb", "adb"))
@@ -52,22 +54,17 @@ def main():
         executor = Executor(device, observer, logger, store, config["package"],
                             Budget(config.get("run_timeout", 2400)))
         session = Session(executor, config)
-        tasks = build_tasks(session)
+        tasks = [TaskSpec(name, module, fn) for name, module, fn in build_tasks(session)]
         if args.command == "debug" and not (args.module or args.task):
             parser.error("debug requires --module or --task")
-        selected = [(name, fn) for name, module, fn in tasks if args.command == "daily"
-                    or name == args.task or (not args.task and module == args.module)]
-        if not selected:
-            raise AutomationError("Unknown task or module")
-        for name, fn in selected:
-            session.task = name
-            logger.emit("task.started", task=name)
-            fn()
-            logger.emit("task.finished", task=name, status=store.status(name))
-        print(json.dumps(dict(run=run, status="SUCCESS")))
+        selected = select_tasks(tasks, args.command, module=args.module, task=args.task)
+        manager = TaskManager(store, logger, session)
+        manager.run(selected)
+        print(json.dumps(dict(run=run, status="SUCCESS", tasks=manager.completed)))
         return 0
     except (AutomationError, KeyboardInterrupt) as exc:
-        logger.emit("run.failed", error=str(exc), code=getattr(exc, "code", "INTERRUPTED"))
+        logger.emit("run.failed", error=str(exc), code=getattr(exc, "code", "INTERRUPTED"),
+                    current_task=manager.current_task if manager else None)
         print(f"FAILED: {exc}\nLog: {logger.path}", file=sys.stderr)
         return 1
     finally:
