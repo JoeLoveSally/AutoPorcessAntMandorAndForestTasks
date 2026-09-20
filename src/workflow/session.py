@@ -3,6 +3,9 @@ from __future__ import annotations
 import re
 
 from domain_data import AutomationError
+from screen_perception.query import ElementQuery, find_elements
+
+TASK_BUTTON = "去完成|去答题|去逛逛|去捐蛋|去请客|去喂食|领取|明天再来|已完成|已领取|点后"
 
 
 class Session:
@@ -110,10 +113,7 @@ class Session:
                 raise AutomationError(f"Ambiguous task identity {title}", "AMBIGUOUS")
             if titles:
                 anchor = titles[0]
-                x, y = anchor.point
-                buttons = [e for e in obs.elements if e.point[0] > x
-                           and abs(e.point[1] - y) < obs.height*.035
-                           and re.search("去完成|去答题|去逛逛|去捐蛋|去请客|去喂食|领取|明天再来|已完成|已领取|点后", e.text)]
+                buttons = find_elements(obs, ElementQuery(TASK_BUTTON, card_title=title))
                 if len(buttons) == 1:
                     return obs, anchor, buttons[0]
                 if re.search("[（(]1/1[）)]", anchor.text):
