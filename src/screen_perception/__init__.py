@@ -41,6 +41,21 @@ PAGE_RULES = (
 )
 
 
+def close_circle_element(observation: Observation, circle, crop_origin: tuple[int, int]) -> Element:
+    """Convert a detected circle in a cropped image to full-screen coordinates.
+
+    A cropped-image center MUST NOT be sent directly to ADB as a screen tap.
+    """
+    cx, cy, radius = (int(value) for value in circle)
+    left, top = crop_origin
+    x, y = left + cx, top + cy
+    bounds = (max(0, x - radius), max(0, y - radius),
+              min(observation.width, x + radius), min(observation.height, y + radius))
+    if not (bounds[0] < bounds[2] and bounds[1] < bounds[3]):
+        raise AutomationError("Invalid overlay close target", "BOUNDS")
+    return Element("广告关闭", bounds, observation.id, "vision.close_circle", 0.9)
+
+
 def classify(observation):
     for name, patterns in PAGE_RULES:
         if all(observation.has(p) for p in patterns):
@@ -50,29 +65,23 @@ def classify(observation):
                           ("reward", "获得奖励|开心收下"), ("confirm", "确认喂食|选择美食|兑换确认")):
         if observation.has(pattern):
             observation.overlays.append(name)
-    # The manor homepage may keep the underlying card text visible while a
-    # modal ad dims the whole screen. Treat the ad as an overlay only when a
-    # dimmed modal region and its dismiss control are both present; the same
-    # words on the normal homepage remain ordinary page content.
+    # Homepage ads may obscure the content while leaving the bottom navigation
+    # text visible. Locate the close circle only within a known modal context.
     if observation.page == "manor" and observation.image is not None:
         image = observation.image
         h, w = image.shape[:2]
         center = image[int(h * .25):int(h * .86), int(w * .08):int(w * .92)]
-        if float(center.mean()) < 125 and observation.has("立即领现金|玩游戏得现金"):
-            close_region = image[int(h * .78):int(h * .99), int(w * .35):int(w * .75)]
-            gray = cv2.cvtColor(close_region, cv2.COLOR_BGR2GRAY)
-            circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, 1.2, 80,
-                                       param1=100, param2=45, minRadius=25, maxRadius=120)
-            if circles is not None:
-                observation.overlays.append("manor_ad")
-                # Keep the close target tied to the current full-resolution
-                # observation; never reuse a coordinate from an earlier ad.
-                circle = max(circles[0], key=lambda item: item[2])
-                cx, cy, radius = map(int, circle)
-                observation.elements.append(
-                    Element("广告关闭", (cx-radius, cy-radius, cx+radius, cy+radius),
-                            observation.id, "vision.close_circle", 0.9)
-                )
+        if center.size and float(center.mean()) < 125 and observation.has("立即领现金|玩游戏得现金"):
+            x0, y0 = int(w * .35), int(h * .78)
+            close_region = image[y0:int(h * .99), x0:int(w * .75)]
+            if close_region.size:
+                gray = cv2.cvtColor(close_region, cv2.COLOR_BGR2GRAY)
+                circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, 1.2, 80,
+                                           param1=100, param2=45, minRadius=25, maxRadius=120)
+                if circles is not None:
+                    observation.overlays.append("manor_ad")
+                    circle = max(circles[0], key=lambda item: item[2])
+                    observation.elements.append(close_circle_element(observation, circle, (x0, y0)))
     return observation
 
 
@@ -141,7 +150,7 @@ class Observer:
         (self.directory / (oid + ".png")).write_bytes(png)
         payload = dict(id=oid, reason=reason, page=obs.page, overlays=obs.overlays,
                        captured=captured, package=package, width=w, height=h,
-                       elements=[asdict(e) for e in elements])
+                       elements=[asdict(e) for e in obs.elements])
         (self.directory / (oid + ".json")).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         self.logger.emit("observation", **payload)
         return obs
