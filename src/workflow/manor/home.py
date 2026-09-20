@@ -1,4 +1,4 @@
-"""Manor homepage task workflows. All clicks require a fresh page observation."""
+"""Manor homepage tasks. Every action must originate from a fresh observation."""
 
 from __future__ import annotations
 
@@ -26,8 +26,6 @@ class ManorHome:
                 if confirmation.page == "manor" and not confirmation.overlays and not confirmation.has(
                     "^打赏$", REWARD_REGION
                 ):
-                    # Only a genuinely absent optional task is SKIPPED. Once
-                    # any friend was rewarded the overall task is SUCCESS.
                     s.done(confirmation, skipped=(rewards_given == 0))
                     return
                 obs = confirmation
@@ -54,12 +52,11 @@ class ManorHome:
             s.done(confirmed, skipped=True)
             return
         s.tap("马上去找", lambda after: after.page == "manor_friend")
-        # The chicken can be on either side. Only proceed if the active page
-        # exposes a unique target; never substitute a memorized coordinate.
-        s.tap("带小鸡回家", lambda after: after.page == "manor" and not after.has(
-            "马上去找|小鸡外出"
-        ))
-        s.done()
+        # The floating '带小鸡回家' text is an instruction, NOT evidence that
+        # its own bounds are a tappable chicken. Capture the friend page and
+        # stop rather than tapping a guessed target on either side.
+        s.observe("roaming-chicken-target-needs-calibration")
+        raise AutomationError("Roaming chicken visual target is not calibrated", "TARGET_UNKNOWN")
 
     def diary(self):
         s = self.s
