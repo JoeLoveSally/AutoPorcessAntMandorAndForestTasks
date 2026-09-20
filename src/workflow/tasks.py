@@ -2,14 +2,15 @@ from functools import partial
 
 from workflow.forest.daily import Forest
 from workflow.manor.daily import Manor
+from workflow.manor.home import ManorHome
 
 
 def build_tasks(session):
-    manor, forest = Manor(session), Forest(session)
+    home, manor, forest = ManorHome(session), Manor(session), Forest(session)
     tasks = [
-        ("manor.home.reward_friends", "manor_home", manor.reward_friends),
-        ("manor.home.bring_home", "manor_home", manor.bring_home),
-        ("manor.home.diary", "manor_home", manor.diary),
+        ("manor.home.reward_friends", "manor_home", home.reward_friends),
+        ("manor.home.bring_home", "manor_home", home.bring_home),
+        ("manor.home.diary", "manor_home", home.diary),
         ("manor.family.donate_egg", "manor_family", manor.family_donate),
         ("manor.family.meal", "manor_family", partial(manor.family_action, "meal")),
         ("manor.family.feed", "manor_family", partial(manor.family_action, "feed")),
