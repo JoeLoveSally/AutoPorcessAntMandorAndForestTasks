@@ -6,8 +6,8 @@ module and leaf task. The persistent Store owns the only task status record.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Callable, Iterable
 
 from domain_data import AutomationError
 
