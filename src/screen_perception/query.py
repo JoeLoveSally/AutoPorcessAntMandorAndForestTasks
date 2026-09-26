@@ -19,7 +19,15 @@ class ElementQuery:
     text: str
     region: Region = FULL_SCREEN
     card_title: str | None = None
-    row_tolerance: float = 0.035
+    row_tolerance: float = 0.05
+    # Device evidence (2026-09-25, run 184a5a): the video row's CTA sits
+    # 113.5px below its title center (two description lines) and .035
+    # (=112px at height 3200) rejected it by 1.5px - row() then fell back
+    # to the synthetic button-column tap, whose title_y+35 slot landed in
+    # the row's claim pill and popped a full-bag refusal dialog. Foreign
+    # buttons stay >=259px from their title while the minimum observed row
+    # pitch is 330px (> 2*160), so the widened pairing still rejects
+    # neighbours and any future double match fails closed as ambiguous.
     require_right_of_title: bool = True
 
 

@@ -11,33 +11,101 @@ import cv2
 import numpy as np
 
 from domain_data import AutomationError, Element, Observation
+from screen_perception.vision import manor_diary_entry
 
 # More specific child pages precede parent pages whose title remains visible.
+# Device OCR systematically confuses 立 with 主 ("主即签到" on the family page
+# and "主即领取" on the reward destination, observed 2026-09-20..22), so every
+# 立即* button matches the [立三主]即* class.
 PAGE_RULES = (
-    ("donate_success", ("捐蛋成功",)),
-    ("donate_quantity", ("选择捐蛋数量", "立即捐蛋")),
-    ("donate_detail", ("立即捐蛋",)),
-    ("donate_projects", ("去捐蛋", "爱心|助力|项目")),
+    # The home's quick-action row (扫一扫 + 收付款) together with the 我的 tab
+    # is a signature no H5 child page carries, so home outranks every child
+    # rule: device evidence (2026-09-24, run 386e27) - a transient 领肥料 icon
+    # badge beside the home's 芭芭农场 icon satisfied the farm rule mid-run,
+    # ensure planned Back from a page that was really the alipay home, the
+    # back exited the app to the unrecognized launcher, and the task timed
+    # out waiting for page != UNKNOWN. Real-device evidence (2026-09-22):
+    # OCR reads the quick-action label as "扫一拉", accepted as a variant.
+    # Run 0ce9ab (2026-09-24): the brush-font home read it as "拉一拉"
+    # (neither prior variant) while 收付款 and 我的 stayed clean, all three
+    # recognises failed and the recovery's backs again walked Alipay out
+    # to the launcher - so the always-clean home grid label 市民中心 now
+    # anchors group one whatever the brush glyphs OCR into.
+    ("alipay", ("扫一扫|扫一拉|拉一拉|市民中心", "收付款|收钱", "我的")),
+    ("donate_success", ("捐蛋成功|本次捐了|主人，你已成功向|贡献了.*份爱心",)),
+    ("donate_quantity", ("捐爱心蛋|选择捐蛋数量", r"选择捐蛋数量|^[1/]\s*颗$|^5颗$|^自定义$")),
+    # Device evidence (2026-09-24, run 17b8ff): the real project detail page
+    # carries 活动截止时间 / 筹集中 / 爱心值奖励 and a bottom-center 去捐蛋;
+    # none of the demo-era markers exist, so it classified UNKNOWN while the
+    # first-project postcondition waited. The project list cannot match this
+    # rule (no group-1 marker), and group2 keeps the demo-era labels.
+    # The 筹集中 token is deliberately absent (run 866f6a): the manor home's
+    # 第2间房 card reads 正在筹集中 and the bottom nav always carries 去捐蛋,
+    # so the home classified donate_detail and the ^蚂蚁庄园$ entry
+    # postcondition timed out; the detail keeps its five page-specific
+    # group-1 markers, every device frame of it carrying at least one.
+    ("donate_detail", ("活动截止时间|爱心值奖励|项目介绍|本期目标|我的约定",
+                       "[立三主]即捐蛋|捐爱心蛋|去捐蛋")),
     ("family_tasks", ("攒亲密度", "请家人|每日捐蛋|帮家人")),
-    ("family", ("家庭", "立即签到|攒亲密度")),
-    ("diary", ("小鸡日记", "贴贴小鸡|明日再来")),
-    ("quiz", ("庄园小课堂",)),
+    ("donate_projects", ("捐爱心蛋", "我已助力|乡村儿童|待帮助", "去捐蛋")),
+    ("family", ("欢乐金家桶|家庭", "[立三主]即签到|攒亲密度|我的奖励")),
+    ("diary", ("小鸡日记|全部日记", "贴贴小鸡|明日再来")),
+    # Parent task-list pages must precede child pages whose names also appear
+    # as task-card titles on the parent page.
     ("feed", ("饲料任务",)),
-    ("kitchen", ("小鸡厨房", "做美食|食材")),
+    # The answer-explanation view (run add4f1, 2026-09-24) drops every
+    # list/header marker - 庄园小课堂/题目来源/答答星球 are all gone - and
+    # carries only the outcome line (回答错误;, parallel 回答正确 for the
+    # right pick) plus the result page's 去领取饲料, so it classified
+    # UNKNOWN while the quiz-answer postcondition demanded page == quiz.
+    ("quiz", ("庄园小课堂|题目来源|答答星球|回答错误|回答正确|去领取饲料",)),
+    # Device evidence (2026-09-25, run 697d65): the event period's kitchen
+    # page drops the 小鸡厨房 title from OCR - six identical stable captures
+    # after kitchen-open, title slot empty while the header shows 秋食风味录
+    # - so the entry postcond timed out with page=UNKNOWN even though 做美食
+    # / 领今日食材 / the spec L77 fixed 爱心食材店 entrance were all OCR'd.
+    # Accept those layout markers as group one. Run d9fb5d then showed the
+    # child 献爱心 得食材 page carries its own 爱心食材店 store header, so
+    # this rule stole the child whenever it was matched first - the child's
+    # 献爱心 group comes ahead of it now, and the kitchen main page itself
+    # never carries 献爱心.
     ("ingredient_shop", ("献爱心", "食材")),
+    ("kitchen", ("小鸡厨房|爱心食材店|领今日食材", "做美食|食材")),
     ("farm_tasks", ("做任务集肥料",)),
     ("farm", ("芭芭农场", "施肥|肥料")),
-    ("lottery", ("立即抽奖", "每日签到|抽奖机会|去逛逛|杂货铺")),
-    ("treasure", ("森林寻宝",)),
-    ("rain", ("能量雨", "立即开始|送TA机会|再来一次|今日已|获得|明日")),
-    ("love", ("真爱合种", "为爱攒能量|攒能量|今日")),
-    ("cooperate", ("合种", "浇水")),
+    # Device evidence (2026-09-24, run 9828af): once the sign card was
+    # claimed and the finished (3/3) ad row collapsed out of view, the
+    # post-claim panel still exposed 装扮抽抽乐 / 还剩N次机会 / the exchange
+    # subtask, yet none of the original group-2 markers survived - ensure
+    # read UNKNOWN while standing on the page and the recovery started
+    # backing out of it (feed -> farm spiral) until the unknown-page guard
+    # refused the blind Back. Keep the original markers and add the ones
+    # the completed panel still carries.
+    ("lottery", ("[立三主]即抽奖",
+                 ("每日签到|抽奖机会|去逛逛|杂货铺|消耗饲料换机会|"
+                  "还剩\\d+次机会|装扮抽抽乐|做任务得机会"))),
+    # The forest home carries a floating "森林寻宝" entrance badge that OCR
+    # sometimes reads in full, so the badge text alone is not child evidence;
+    # the child page itself exposes the lottery entry the workflow taps next.
+    ("treasure", ("森林寻宝", "[立三主]即抽奖")),
+    # Device evidence (2026-09-24, run fc6273): the freshly opened page OCRs
+    # its headline as "拯救绿色能量" and its CTA as "主即开启" (the known 立/主
+    # confusion; spec line 103 calls the button 立即开始) while none of the
+    # round/result markers exist yet - entry, round start and the gift return
+    # must all land on "rain".
+    ("rain", ("能量雨", "[立三主]即开[始启]|拯救.*能量|送TA机会|再来一次|今日已|获得|明日")),
     ("forest_friend", ("的蚂蚁森林", "一键收|找能量|找更多能量|收取TA")),
-    ("forest", ("蚂蚁森林", "森林广场|找能量|合种")),
+    # Device evidence (2026-09-23): with every friend already harvested, the
+    # 找能量 button opens this summary page instead of the deck. It shares
+    # the forest's header and a 找能量 mention, so both of its own markers
+    # (title and exit button) are required to give it a page id of its own.
+    ("forest_summary", ("找能量共获得", "返回森林首页")),
+    ("forest", ("蚂蚁森林", "森林广场|找能量")),
+    ("love", ("真爱合种", "为爱攒能量|攒能量明细|已为爱攒|累计一起攒")),
+    ("cooperate", ("小树苗|合种", "浇水", "证书|今日排行|说点啥")),
     ("manor_friend", ("的蚂蚁庄园", "蹭吃|雇佣|带小鸡")),
     ("manor", ("蚂蚁庄园", "领饲料", "家庭")),
-    ("ad", ("可领饲料|可领奖励|浏览完成|任务.*浏览|浏览.*秒|滑动.*秒",)),
-    ("alipay", ("扫一扫", "收付款|收钱", "我的")),
+    ("ad", ("可领饲料|可领奖励|浏览完成|任务.*浏览|浏览.*秒|滑动.*浏览|看15s视频",)),
 )
 
 
@@ -61,8 +129,16 @@ def classify(observation):
         if all(observation.has(p) for p in patterns):
             observation.page = name
             break
-    for name, pattern in (("guess", "猜价格|猜价"), ("overflow", "超过.*上限|超出.*上限|饲料袋已满"),
-                          ("reward", "获得奖励|开心收下"), ("confirm", "确认喂食|选择美食|兑换确认")):
+    # Both feed-claim blockers count as "overflow": spec L29's discard-confirm
+    # (超过上限) and the zero-headroom refusal observed 2026-09-24 (run
+    # 0ace75) 饲料袋已满 / 先消耗一些饲料再来领取吧~ - OCR also misreads 已 as 巴.
+    # The near-full confirm (2026-09-25, run 7ecb00) 饲料袋快满了 /
+    # 只能装下60g，确认领取吗？ is the same bag-capacity family.
+    for name, pattern in (("guess", "猜价格|猜价"),
+                          ("overflow", ("超过.*上限|超出.*上限|饲料袋[已巴]满|先消耗一些饲料"
+                                       "|饲料袋快满|只能装下")),
+                          ("reward", "获得奖励|恭喜获得七日礼包|家庭家具上新啦|开心收下|我知道啦|去蚂蚁森林收能量|施肥挑战"),
+                          ("confirm", "确认喂食|选择美食|兑换确认")):
         if observation.has(pattern):
             observation.overlays.append(name)
     # Homepage ads may obscure the content while leaving the bottom navigation
@@ -71,17 +147,94 @@ def classify(observation):
         image = observation.image
         h, w = image.shape[:2]
         center = image[int(h * .25):int(h * .86), int(w * .08):int(w * .92)]
-        if center.size and float(center.mean()) < 125 and observation.has("立即领现金|玩游戏得现金"):
-            x0, y0 = int(w * .35), int(h * .78)
-            close_region = image[y0:int(h * .99), x0:int(w * .75)]
+        if center.size and float(center.mean()) < 160 and observation.has("[立三主]即领现金|玩游戏得现金"):
+            # Current Manor campaigns place the close control just below the
+            # card (around 76% screen height). Keep this region tight so round
+            # artwork inside the campaign cannot be mistaken for the close.
+            x0, y0 = int(w * .30), int(h * .70)
+            close_region = image[y0:int(h * .84), x0:int(w * .70)]
             if close_region.size:
                 gray = cv2.cvtColor(close_region, cv2.COLOR_BGR2GRAY)
                 circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, 1.2, 80,
-                                           param1=100, param2=45, minRadius=25, maxRadius=120)
+                                           param1=100, param2=45,
+                                           minRadius=max(20, int(w * .025)),
+                                           maxRadius=max(40, int(w * .06)))
                 if circles is not None:
                     observation.overlays.append("manor_ad")
-                    circle = max(circles[0], key=lambda item: item[2])
+                    expected = (close_region.shape[1] / 2, close_region.shape[0] * .47)
+                    circle = min(
+                        circles[0],
+                        key=lambda item: (item[0] - expected[0]) ** 2 + (item[1] - expected[1]) ** 2,
+                    )
                     observation.elements.append(close_circle_element(observation, circle, (x0, y0)))
+    # Full-screen campaign modals dim the forest scene behind a dark scrim
+    # while the artwork in the middle stays bright (real-device evidence
+    # 2026-09-21: scrim bands ~88 gray vs ~195 on the normal home), and the
+    # close control is a circle just below the bottom center.
+    if observation.page == "forest" and observation.image is not None:
+        image = observation.image
+        h, w = image.shape[:2]
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        bands = [gray[int(h * a):int(h * b), int(w * c):int(w * d)]
+                 for a, b, c, d in ((.30, .70, .02, .16), (.30, .70, .84, .98),
+                                    (.12, .18, .02, .98), (.60, .72, .02, .98))]
+        ring = float(np.mean([band.mean() for band in bands if band.size]))
+        center = gray[int(h * .38):int(h * .62), int(w * .30):int(w * .70)]
+        center_mean = float(center.mean()) if center.size else 0.0
+        if ring < 115 and center_mean > ring + 25:
+            x0, y0 = int(w * .28), int(h * .78)
+            crop = gray[y0:int(h * .93), x0:int(w * .72)]
+            if crop.size:
+                blurred = cv2.GaussianBlur(np.clip(crop, 0, 255).astype(np.uint8), (5, 5), 1.2)
+                circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, 1.2, 80,
+                                            param1=100, param2=45,
+                                            minRadius=max(20, int(w * .02)),
+                                            maxRadius=max(40, int(w * .05)))
+                if circles is not None:
+                    expected = (crop.shape[1] / 2, crop.shape[0] * .58)
+                    circle = min(
+                        circles[0],
+                        key=lambda item: (float(item[0]) - expected[0]) ** 2
+                        + (float(item[1]) - expected[1]) ** 2,
+                    )
+                    distance = ((float(circle[0]) - expected[0]) ** 2
+                                + (float(circle[1]) - expected[1]) ** 2) ** .5
+                    if distance <= w * .07:
+                        observation.overlays.append("forest_campaign")
+                        observation.elements.append(close_circle_element(observation, circle, (x0, y0)))
+    # Alipay-home interstitials (real-device evidence 2026-09-25, run
+    # 41640d): the 广州生活卡 / 支付打车外卖组合券包 coupon card covered the
+    # middle of the常用 icon row - 蚂蚁森林 and 游戏中心 sit behind it -
+    # while the bottom nav stayed readable, so the page still classified
+    # alipay, overlays stayed empty, and the forest entry tap found 0. The
+    # card carries no close text: its floating circle sits below the card
+    # around 69% screen height. The card text gates the scan so the round
+    # icons of a clean home can never trigger it.
+    if observation.page == "alipay" and observation.has("广州生活卡|组合券包") \
+            and observation.image is not None:
+        image = observation.image
+        h, w = image.shape[:2]
+        x0, y0 = int(w * .35), int(h * .62)
+        crop = cv2.cvtColor(image[y0:int(h * .80), x0:int(w * .65)], cv2.COLOR_BGR2GRAY)
+        if crop.size:
+            blurred = cv2.GaussianBlur(crop, (5, 5), 1.2)
+            circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, 1.2, 80,
+                                       param1=100, param2=45,
+                                       minRadius=max(20, int(w * .025)),
+                                       maxRadius=max(40, int(w * .06)))
+            if circles is not None:
+                expected = (crop.shape[1] / 2, crop.shape[0] * .40)
+                circle = min(
+                    circles[0],
+                    key=lambda item: (float(item[0]) - expected[0]) ** 2
+                    + (float(item[1]) - expected[1]) ** 2,
+                )
+                distance = ((float(circle[0]) - expected[0]) ** 2
+                            + (float(circle[1]) - expected[1]) ** 2) ** .5
+                if distance <= w * .07:
+                    observation.overlays.append("home_promo")
+                    observation.elements.append(
+                        close_circle_element(observation, circle, (x0, y0)))
     return observation
 
 
@@ -147,10 +300,12 @@ class Observer:
                         elements[index] = Element(visual.text, visual.bounds, oid, "ui_tree+ocr", visual.score)
                         break
         obs = classify(Observation(oid, captured, w, h, package, elements, image=image))
+        if obs.page == "manor" and (diary := manor_diary_entry(obs)):
+            obs.elements.append(diary)
         (self.directory / (oid + ".png")).write_bytes(png)
-        payload = dict(id=oid, reason=reason, page=obs.page, overlays=obs.overlays,
-                       captured=captured, package=package, width=w, height=h,
-                       elements=[asdict(e) for e in obs.elements])
+        payload = {"id": oid, "reason": reason, "page": obs.page, "overlays": obs.overlays,
+                   "captured": captured, "package": package, "width": w, "height": h,
+                   "elements": [asdict(e) for e in obs.elements]}
         (self.directory / (oid + ".json")).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         self.logger.emit("observation", **payload)
         return obs

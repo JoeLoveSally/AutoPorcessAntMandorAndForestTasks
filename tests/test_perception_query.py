@@ -38,6 +38,26 @@ class QueryTests(unittest.TestCase):
         with self.assertRaises(AutomationError):
             find_elements(obs, ElementQuery("去答题", card_title="庄园小课堂"))
 
+    def test_two_line_row_button_pairs_despite_the_wider_gap(self):
+        # Device evidence (2026-09-25, run 184a5a): the video row's CTA
+        # center sits 113.5px below its title center (two description
+        # lines), just past the old .035 (=112px) tolerance - row() fell
+        # to the button-column fallback and blind-tapped a claim pill.
+        # The row's neighbours stay >=259px away, so pairing remains unique.
+        oid = "video-row"
+        obs = Observation(oid, 0.0, 1440, 3200, "alipay", [
+            Element("看庄园小视频", (321, 1945, 628, 1998), oid),
+            Element("领取", (1179, 2059, 1282, 2111), oid),   # own, +113.5px
+            Element("领取", (1179, 1687, 1282, 1738), oid),   # quiz row, -259.5px
+            Element("去完成", (1158, 2387, 1301, 2443), oid),  # market row, +443.5px
+        ], page="feed")
+
+        buttons = find_elements(
+            obs, ElementQuery("领取|去完成", card_title="看庄园小视频"))
+
+        self.assertEqual(len(buttons), 1)
+        self.assertEqual(buttons[0].bounds, (1179, 2059, 1282, 2111))
+
     def test_read_returns_text_without_business_decision(self):
         self.assertEqual(read_text(sample(), "庄园小课堂"), ["庄园小课堂"])
 
