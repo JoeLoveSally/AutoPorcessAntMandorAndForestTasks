@@ -54,7 +54,7 @@ logger：记录各组件的动作、状态和诊断信息
 runtime/：由 runtime 组件管理的运行数据
 ```
 
-普通页面使用 ADB 截图、UI Tree 和 ADB 输入。能量雨使用独立的实时视频与低延迟触控通道，但仍通过同一台 ADB 设备建立连接。
+普通页面使用 ADB 截图、UI Tree 和 ADB 输入。能量雨使用 Android 原生 `screenrecord` H.264 连续帧与持久 ADB Shell 触控通道，避免逐帧启动 ADB 进程；scrcpy 保留为后续可替换的视频或控制实现。两种实时实现仍使用同一台 ADB 设备。
 
 UI Tree 在自绘页面可能不可用，此时通过截图识别。能量雨实现可参考 `real-device-regression` 分支，仍需在当前设备上验证延迟和效果。
 
@@ -66,7 +66,7 @@ UI Tree 在自绘页面可能不可用，此时通过截图识别。能量雨实
 
 - `common`：设备接口、坐标、边界、屏幕尺寸和方向换算。
 - `adb`：截图、UI dump、点击、滑动、返回、启动应用和前台页面查询。
-- `realtime`：scrcpy 视频流、H.264 解码、低延迟触控和延迟统计。
+- `realtime`：连续 H.264 视频帧、持久触控通道和延迟统计；首版使用 `screenrecord`，接口允许以后替换为 scrcpy。
 
 上层组件不能直接执行 ADB 或 scrcpy 命令。
 
