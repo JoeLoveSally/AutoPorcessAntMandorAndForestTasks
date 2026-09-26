@@ -1,7 +1,20 @@
 serial = "10AD4419NX0029Z"
 adb = "adb"
 package = "com.eg.android.AlipayGphone"
+# Used to distinguish your 520g watering record from other members' records.
+forest_owner = ""
 page_timeout = 25.0
 run_timeout = 2400.0
 max_scrolls = 16
+max_reset_scrolls = 8
+energy_sign_wait = 6.0
+ad_entry_attempts = 2
 quiz_option = 0
+ffmpeg = "ffmpeg"
+realtime_width = 720
+realtime_bitrate = 8000000
+realtime_start_timeout = 12.0
+rain_countdown_seconds = 2.6
+rain_duration_seconds = 22.0
+rain_dedup_radius = 46
+rain_touch_prediction = 0.08

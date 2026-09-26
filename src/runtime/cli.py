@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 import time
 import tomllib
@@ -18,6 +19,13 @@ from state_machine import Budget
 from state_machine.task_manager import TaskManager, TaskSpec, select_tasks
 
 
+def config_path(root, explicit=None):
+    path = explicit or root / "config/config.toml"
+    if not path.is_file():
+        raise AutomationError(f"Missing local config: {path}", "CONFIG")
+    return path
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=("doctor", "capture", "daily", "debug"))
@@ -27,18 +35,25 @@ def main():
     parser.add_argument("--task")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
-    config_path = args.config or root / "config/config.example.toml"
-    config = tomllib.loads(config_path.read_text())
-    serial = args.serial or config["serial"]
     run = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
     logger = Logger(root, run)
     store = None
     manager = None
     try:
+        selected_config = config_path(root, args.config)
+        config = tomllib.loads(selected_config.read_text())
+        serial = args.serial or config["serial"]
+        for executable in (config.get("adb", "adb"), config.get("ffmpeg", "ffmpeg")):
+            if shutil.which(executable) is None:
+                raise AutomationError(f"Required executable not found: {executable}", "CONFIG")
         store = Store(root / "runtime", serial, run)
         device = Device(serial, config.get("adb", "adb"))
         if args.command == "doctor":
             info = device.info()
+            info["tools"] = {
+                "adb": shutil.which(config.get("adb", "adb")),
+                "ffmpeg": shutil.which(config.get("ffmpeg", "ffmpeg")),
+            }
             info["display"] = [s.strip() for s in info["display"].splitlines()
                                if "SurfaceOrientation" in s or "SurfaceWidth" in s or "SurfaceHeight" in s]
             print(json.dumps(info, ensure_ascii=False, indent=2))
@@ -46,8 +61,8 @@ def main():
         observer = Observer(device, root / "screenshots/runs" / run, logger)
         if args.command == "capture":
             obs = observer.capture("capture", full=True)
-            print(json.dumps(dict(run=run, page=obs.page, overlays=obs.overlays,
-                                  text=[e.text for e in obs.elements]), ensure_ascii=False, indent=2))
+            print(json.dumps({"run": run, "page": obs.page, "overlays": obs.overlays,
+                              "text": [e.text for e in obs.elements]}, ensure_ascii=False, indent=2))
             return 0
         from workflow.session import Session
         from workflow.tasks import build_tasks
@@ -60,7 +75,7 @@ def main():
         selected = select_tasks(tasks, args.command, module=args.module, task=args.task)
         manager = TaskManager(store, logger, session)
         manager.run(selected)
-        print(json.dumps(dict(run=run, status="SUCCESS", tasks=manager.completed)))
+        print(json.dumps({"run": run, "status": "SUCCESS", "tasks": manager.completed}))
         return 0
     except (AutomationError, KeyboardInterrupt) as exc:
         logger.emit("run.failed", error=str(exc), code=getattr(exc, "code", "INTERRUPTED"),
