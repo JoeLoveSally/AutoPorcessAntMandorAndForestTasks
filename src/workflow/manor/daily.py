@@ -1,55 +1,30 @@
 from __future__ import annotations
 
+import json
 import re
 
-from domain_data import AutomationError
+from domain_data import AutomationError, Element
+
+
+def _load_frame_texts(session, run, frame_id):
+    """Texts of a recorded run frame, or None when it cannot be read.
+
+    The observer's directory sits at <runs root>/<current run>, so the
+    sibling run folder holds every past submission's before frame; any
+    read failure returns None and callers must treat that as "no proof".
+    """
+    try:
+        root = session.ex.observer.directory.parent
+        payload = json.loads((root / run / f"{frame_id}.json")
+                             .read_text(encoding="utf-8"))
+        return [element.get("text", "") for element in payload["elements"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 class Manor:
     def __init__(self, session):
         self.s = session
-
-    def reward_friends(self):
-        s = self.s
-        obs = s.ensure("manor")
-        for _ in range(30):
-            matches = obs.find("^打赏$", (0,.55,.55,.9))
-            if not matches:
-                confirmed = s.observe("reward-absence-confirm")
-                if confirmed.page != "manor" or confirmed.overlays or confirmed.has("^打赏$", (0,.55,.55,.9)):
-                    obs = confirmed
-                    continue
-                s.done(confirmed, skipped=True)
-                return
-            element = obs.one("^打赏$", (0,.55,.55,.9))
-            before = tuple(e.text for e in obs.find(".", (0,.55,.55,.9)))
-            obs = s.tap_element(obs, element, lambda o: o.page == "manor" and tuple(
-                e.text for e in o.find(".", (0,.55,.55,.9))) != before,
-                name="reward-friend", spend=True)
-        raise AutomationError("Reward loop exhausted without completion")
-
-    def bring_home(self):
-        s = self.s
-        obs = s.ensure("manor")
-        if not obs.has("马上去找|小鸡外出"):
-            confirmed = s.observe("home-confirm")
-            if confirmed.page != "manor" or confirmed.overlays or confirmed.has("马上去找|小鸡外出"):
-                raise AutomationError("Cannot confirm chicken home")
-            s.done(confirmed, skipped=True)
-            return
-        s.tap("马上去找", lambda o: o.page == "manor_friend")
-        s.tap("带小鸡回家|带小鸡回家", lambda o: o.page == "manor" and not o.has("马上去找|小鸡外出"))
-        s.done()
-
-    def diary(self):
-        s = self.s
-        obs = s.ensure("diary")
-        if obs.has("明日再来"):
-            s.done(obs, already=True)
-        else:
-            s.tap("^贴贴小鸡$", lambda o: o.page == "diary" and o.has("明日再来"), spend=True)
-            s.done()
-        s.back(("manor",))
 
     def family_donate(self):
         s = self.s
@@ -66,43 +41,116 @@ class Manor:
             raise AutomationError("No donation project found")
         s.tap_element(obs, min(projects, key=lambda e:e.point[1]),
                       lambda o:o.page == "donate_detail", name="first-project")
-        s.tap("^立即捐蛋$", lambda o:o.page == "donate_quantity")
+        # Device evidence (2026-09-24, run 17b8ff): the detail page's
+        # bottom-center control reads 去捐蛋 (3 chars wide), not spec L14's
+        # 立即捐蛋; keep the demo-era labels as tolerated variants.
+        s.tap("^[立三主]即捐蛋$|^捐爱心蛋$|^去捐蛋$", lambda o:o.page == "donate_quantity")
         obs = s.observe("donation-quantity")
-        if not obs.has("^1$|^1颗$", (0,.5,1,1)):
+        one_selected = obs.has(r"^[1/]\s*颗$", (0,.5,1,1))
+        quantity_controls = obs.has("^5颗$", (0,.5,1,1)) and obs.has("^自定义$", (0,.5,1,1))
+        if not (one_selected and quantity_controls and obs.has("当前还?有.*颗爱心蛋")):
             raise AutomationError("Donation quantity is not verified as one", "QUANTITY")
-        s.tap("^立即捐蛋$", lambda o:o.page == "donate_success", region=(0,.7,1,1),
+        s.tap("^[立三主]即捐蛋$|^捐爱心蛋$", lambda o:o.page == "donate_success", region=(0,.7,1,1),
               spend=True, detail={"eggs":1})
-        s.back(("donate_detail",))
-        s.back(("donate_projects",))
-        s.back(("family", "family_tasks"))
+        s.ensure("family_tasks")
         s.complete_row("每日捐蛋|捐蛋做好事", page="family_tasks")
 
     def family_action(self, kind):
         s = self.s
-        title_pattern = "请家人.*美食|请家人吃" if kind == "meal" else "帮家人喂"
+        title_pattern = (r"^请家人吃一顿美食.*[（(]\d+/\d+[）)]$" if kind == "meal"
+                         else r"^帮喂家人小鸡.*[（(]\d+/\d+[）)]$")
         obs, title, button = s.row(title_pattern, page="family_tasks")
         if re.search("明天再来|点后|已完成", button.text) or re.search(r"[（(]1/1[）)]", title.text):
             s.done(obs, already=True)
             return
-        prompt = "选择美食" if kind == "meal" else "确认喂食"
-        s.tap_element(obs, button, lambda o:o.has(prompt), name="family-"+kind)
-        s.tap("^确认$", lambda o:o.page == "family_tasks" and not o.has(prompt),
-              overlay=True, spend=True)
+        if obs.has("暂无小鸡"):
+            # Device evidence (2026-09-24, run 974051): the feed slot
+            # rendered the disabled two-line label 暂无小鸡可喂 (OCR
+            # segments it as 暂无小鸡 + 可喂), so no TASK_BUTTON matched -
+            # row() fell through three row-refresh frames to the column
+            # fallback, whose tap is a no-op on the dead label. No family
+            # chicken is feedable right now; (0/1) cannot advance.
+            s.done(obs, skipped=True)
+            return
+        prompt = "美食" if kind == "meal" else "确认喂食"
+        s.tap_element(obs, button, lambda o:o.has(prompt) or o.has("^确认$"), name="family-"+kind)
+        # Device evidence (2026-09-24, run 3b0d9e): the open sheet classifies
+        # UNKNOWN (title OCRs 已选4份美食..., matching no page rule), so
+        # page == family_tasks alone proves dismissal. The old
+        # not-o.has(prompt) clause was unsatisfiable for meal - the list row
+        # title 请家人吃一顿美食(1/3) itself contains 美食 - so a verified
+        # 0/3 -> 1/3 请客 still timed out; complete_row re-verifies below.
+        s.tap("^确认$", lambda o:o.page == "family_tasks",
+              overlay=True, allow_unknown=True, spend=True)
         s.complete_row(title_pattern, page="family_tasks")
 
     def sign(self):
+        """Claim the feed-page sign-in strip.
+
+        Real-device evidence (2026-09-21): the strip carries no standalone
+        "签到" text, OCR misreads "今天" often, and the whole strip disappears
+        once claimed. Anchor on the list header plus a "第N天" cell instead.
+        """
         s = self.s
-        obs, _, button = s.row("^签到$|^每日签到$", reset=True)
-        if button.text == "已领取":
+        obs = s.ensure("feed")
+        for _ in range(s.config.get("max_reset_scrolls", 8)):
+            if obs.has("饲料任务", (.2, .24, .8, .40)):
+                break
+            obs = s.scroll((.5, .4, .5, .68))
+        if not obs.has("饲料任务", (.2, .24, .8, .40)):
+            raise AutomationError("Feed list top not reachable for daily sign", "UNKNOWN")
+        # Absence must be confirmed twice on a verified top view; a single
+        # observation cannot prove the strip is gone.
+        for _attempt in range(2):
+            if obs.find(r"第[2-5]天", (0, .36, 1, .48)):
+                break
+            obs = s.observe("sign-strip-absence-confirm")
+            if not obs.has("饲料任务", (.2, .24, .8, .40)):
+                raise AutomationError("Feed top lost while confirming sign strip", "UNKNOWN")
+        else:
             s.done(obs, already=True)
             return
-        s.tap_element(obs, button, lambda o:o.has("已领取") or "overflow" in o.overlays,
+        if obs.has("^已领取$", (.68, .36, 1, .48)):
+            s.done(obs, already=True)
+            return
+        buttons = obs.find("^领取$", (.68, .36, 1, .48))
+        if len(buttons) != 1:
+            raise AutomationError("Daily sign-in claim control is not unique", "AMBIGUOUS")
+        button = buttons[0]
+        s.tap_element(obs, button,
+                      lambda o:o.has("^已领取$", (.68, .36, 1, .48)) or "overflow" in o.overlays,
                       name="daily-sign")
         if "overflow" in s.obs.overlays:
-            s.tap("确认|继续领取", lambda o:o.page == "feed" and not o.overlays,
-                  overlay=True, spend=True)
-        obs, _, button = s.row("^签到$|^每日签到$", reset=True)
-        if button.text != "已领取":
+            if s.obs.has("先消耗一些饲料|^知道了$"):
+                # Device evidence (2026-09-24, run 0ace75): at the 1800g cap
+                # Alipay hard-refuses the claim (饲料袋已满; 知道了 /
+                # 去帮好友喂食) instead of spec L29's discard-confirm - no
+                # room is left to discard into. The mandated 主页-家庭-领饲料
+                # order spends feed first (family.feed consumes 180g); if it
+                # already ran, dismiss and fail with the actionable cause
+                # rather than hunting hungry friends (not spec'd, gated by
+                # friend availability). Key on the refusal body or its own
+                # 知道了 button, NOT 去帮好友喂食: the near-full confirm
+                # (2026-09-25, run 7ecb00) carries that same button.
+                s.tap("^知道了$", lambda o:not o.has("先消耗一些饲料|去帮好友喂食"),
+                      overlay=True)
+                raise AutomationError(
+                    "Feed bag full: sign claim blocked; run manor.family.feed first",
+                    "BLOCKED")
+            # Spec L29 mandates confirming the sign claim dialog, including
+            # the near-full variant (2026-09-25, run 7ecb00: 饲料袋快满了 /
+            # 现在饲料袋只能装下60g，确认领取吗？ with 去帮好友喂食 + 确认).
+            # Anchor the button: the dialog body itself contains 确认
+            # (run e5bb6b found 2 unanchored). The frame classifies UNKNOWN
+            # behind the dialog (dimming garbles the feed rule to 饲料千务),
+            # so allow_unknown; and the first post-tap capture may still
+            # show the dialog, so recover=False re-captures until it closes
+            # instead of tripping dismiss's overflow task-specific guard on
+            # the transition frame.
+            s.tap("^确认$|^继续领取$", lambda o:o.page == "feed" and not o.overlays,
+                  overlay=True, allow_unknown=True, recover=False, spend=True)
+        obs = s.observe("verify-daily-sign")
+        if not obs.has("^已领取$", (.68, .36, 1, .48)):
             raise AutomationError("Daily sign-in not verified")
         s.done(obs)
 
@@ -135,10 +183,43 @@ class Manor:
         if re.search("领取|已完成", button.text):
             s.complete_row(title, claim=claim)
             return
-        s.tap_element(obs, button, lambda o:o.page != "feed" or o.has("浏览完成"), name="browse-open")
-        if not instant:
-            browse(s, swipe)
-        s.back(("feed",), allow_unknown=instant)
+        attempts = 1 if instant else s.config.get("ad_entry_attempts", 2)
+        for attempt in range(attempts):
+            s.tap_element(
+                obs,
+                button,
+                lambda o:o.page in ("ad", "UNKNOWN") or "guess" in o.overlays or o.has("浏览完成"),
+                name="browse-open",
+            )
+            if instant:
+                break
+            try:
+                browse(s, swipe)
+                break
+            except AutomationError as exc:
+                if exc.code != "TIMER_MISSING" or attempt + 1 >= attempts:
+                    raise
+                s.back(("feed",), allow_unknown=True)
+                obs, _, button = s.row(title, reset=True)
+                # Device evidence (2026-09-24, run 19d92f): the video really
+                # completed during the timer-missed first attempt (its row
+                # had flipped to 领取), but the retry tapped that claim
+                # button as if it were the entry - claiming the feed and
+                # then timing out waiting for an ad page. A claimable row
+                # after the re-row means the browse is done: complete it
+                # right here instead of tapping again.
+                if re.search("领取|已完成", button.text):
+                    s.complete_row(title, claim=claim)
+                    return
+        # Device evidence (2026-09-25, run f4b926): the ad completion view
+        # auto-advances (浏览完成 -> 任务已完成/看更多视频>, which matches no ad
+        # rule) within ~1s of browse() returning, so a flag computed from
+        # s.obs.page reads browse's stale "ad" frame and validate() then
+        # refused the fresh UNKNOWN observation ("Cannot act on unknown
+        # page"). Back is non-destructive navigation and the ("feed",)
+        # target guards the landing, so allow unknown unconditionally -
+        # same policy as the TIMER_MISSING retry above.
+        s.back(("feed",), allow_unknown=True)
         s.complete_row(title, claim=claim)
 
     def lottery(self, title):
@@ -155,36 +236,72 @@ class Manor:
 
     def farm(self):
         s = self.s
-        obs, _, button = s.row("芭芭农场", reset=True)
+        # Device evidence (2026-09-24, run e2c7d1): the row's own
+        # description 和小鸡一起去芭芭农场逛一逛，完成即可 embeds the full
+        # title text, so the bare 芭芭农场 matched both lines and row()
+        # failed closed with Ambiguous task identity. Anchor the title's
+        # leading 去 - the description starts with 和 - for a single hit.
+        obs, _, button = s.row("^去芭芭农场", reset=True)
         if re.search("领取|已完成", button.text):
-            # Parent completion does not prove the fertilizer work was done.
-            raise AutomationError("Farm parent complete; fertilizer subtasks need independent evidence", "RESULT_UNKNOWN")
+            # The task specification defines the parent card becoming
+            # claimable as the completion evidence for this daily task.
+            s.done(obs, already=True)
+            return
         s.tap_element(obs, button, lambda o:o.page in ("farm", "farm_tasks"), name="farm-open")
-        if s.obs.page == "farm_tasks":
-            for title in ("每日签到", "蚂蚁庄园小鸡肥料"):
-                obs, _, button = s.row(title, page="farm_tasks")
-                if button.text == "领取":
-                    s.tap_element(obs, button, lambda o:o.page == "farm_tasks" and o.has("已领取"),
-                                  name="fertilizer-claim", spend=True)
-            s.back(("farm",))
+        # Device evidence (2026-09-24, run ae2e4d): the farm opens behind a
+        # daily offer card (headline 领1000肥料奖励, subline 浏览精选好物15s
+        # 即可得, CTA 领肥料, bare × centered below the card) that covers the
+        # 施肥 button - OCR found no 施肥 while it was up and vision did not
+        # tag it as an overlay, so the ^施肥$ search exhausted its refreshes
+        # and failed closed. Dismiss it BEFORE the farm_tasks check: the
+        # spec's auto-jump to 做任务集肥料 may only fire after the card is
+        # gone. The × carries no OCR text, so anchor it on the OCR'd
+        # headline (frame 0017: headline [406,1638,1023,1724] center
+        # (714,1681); × center (724,2400), r≈45 → headline center + (+10,+719)).
+        if s.obs.has(r"领\d+肥料奖励"):
+            hx, hy = s.obs.one(r"领\d+肥料奖励").point
+            cx, cy = hx + 10, hy + 719
+            target = Element("关闭礼遇卡", (cx - 90, cy - 90, cx + 90, cy + 90),
+                             s.obs.id)
+            s.tap_element(s.obs, target,
+                          lambda o:o.page in ("farm", "farm_tasks")
+                          and not o.has(r"领\d+肥料奖励"),
+                          name="farm-offer-close")
+        # Device evidence (2026-09-25, run 9d8f76): spec L67's auto-jump to
+        # 做任务集肥料 lands a beat AFTER the farm home renders - the home's
+        # 施肥 was OCR'd on the farm-open frame (0012), gone from 0013's
+        # transition frame and the drawer was open at 0014 - so the old
+        # immediate page check saw the pre-jump home and ^施肥$'s refresh
+        # loop then refused to act across the page change (found 0). The
+        # jump is spec-guaranteed ("页面会自动跳转至'做任务集肥料'页面"):
+        # wait for it, claim the drawer rows, back out, fertilize the
+        # settled home.
+        s.wait(lambda o:o.page == "farm_tasks", "farm-jump")
+        for title in ("每日签到", "蚂蚁庄园小鸡肥料"):
+            obs, _, button = s.row(title, page="farm_tasks")
+            if button.text == "领取":
+                s.tap_element(obs, button, lambda o:o.page == "farm_tasks" and o.has("已领取"),
+                              name="fertilizer-claim", spend=True)
+        s.back(("farm",))
         if s.obs.has("点击领取"):
             s.tap("点击领取", lambda o:o.page == "farm" and not o.has("点击领取"), spend=True)
         for index in range(2):
-            s.tap("^施肥$", lambda o:o.has("立即领肥|施肥挑战"), spend=True,
+            s.tap("^施肥$", lambda o:o.has("[立三主]即领肥|施肥挑战"), spend=True,
                   detail={"fertilization":index+1})
             if s.obs.has("施肥挑战"):
                 s.back(("farm",))
-            s.tap("立即领肥", lambda o:o.has("丰收礼包"))
-            s.tap("立即领取", lambda o:not o.has("立即领取"), spend=True)
+            s.tap("[立三主]即领肥", lambda o:o.has("丰收礼包"))
+            s.tap("[立三主]即领取", lambda o:not o.has("[立三主]即领取"), spend=True)
             s.back(("farm",))
         s.back(("feed",))
-        s.complete_row("芭芭农场")
+        s.complete_row("^去芭芭农场")
 
     def kitchen(self):
         s = self.s
         obs, _, button = s.row("小鸡厨房", reset=True)
         if re.search("领取|已完成", button.text):
-            raise AutomationError("Kitchen parent complete; two meals require independent evidence", "RESULT_UNKNOWN")
+            s.done(obs, already=True)
+            return
         s.tap_element(obs, button, lambda o:o.page == "kitchen", name="kitchen-open")
         for pattern in ("领今日食材", "领取食材"):
             if s.obs.has(pattern):
@@ -193,6 +310,29 @@ class Manor:
         if s.obs.has("领10g食材"):
             s.tap("领10g食材", lambda o:not o.has("领10g食材"), spend=True)
         s.back(("kitchen",))
+        # Device evidence (2026-09-25, runs 3496e7 -> 295962): with the
+        # chickens out (kitchen bubble 主人，我出去啦) the 做美食 tap is
+        # refused by the app behind a ~2s toast 小鸡不在家哦，等它回来 -
+        # caught only by a manual capture, the runner's ~4s cadence missed
+        # all seven post-tap frames - so the gallery postcond starved and
+        # left '做美食' RESULT_UNKNOWN, which then blocked every later spend
+        # of this task (295962 died at the intent before tapping). The
+        # refusal proof is the submission's own before frame: it records
+        # the out-state bubble at tap time, so cancel on that evidence
+        # even once the chickens have walked back. The live bubble only
+        # skips the cook (never tap into a refusal), and a submission
+        # fired from a normal frame keeps blocking behind the intent
+        # guard - no proof, no cancel.
+        for action_id, name, before_id, run in s.ex.store.pending_frames(s.task):
+            if name != "做美食":
+                continue
+            texts = _load_frame_texts(s, run, before_id)
+            if texts is not None and any(
+                    re.search(r"主人，我出去啦|小鸡不在家", t) for t in texts):
+                s.ex.store.action(action_id, "CANCELLED", before_id)
+        if s.obs.has("主人，我出去啦|小鸡不在家"):
+            s.done(s.obs, skipped=True)
+            return
         for index in range(2):
             s.tap("做美食", lambda o:o.has("美食图鉴"), spend=True, detail={"meal":index+1})
             s.back(lambda o:o.page == "kitchen" and not o.has("美食图鉴"))

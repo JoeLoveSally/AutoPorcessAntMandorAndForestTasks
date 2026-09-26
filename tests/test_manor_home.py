@@ -3,7 +3,7 @@
 import unittest
 
 from domain_data import Element, Observation
-from workflow.manor.home import ManorHome, REWARD_REGION
+from workflow.manor.home import ManorHome
 
 
 def observation(oid, texts, page="manor"):

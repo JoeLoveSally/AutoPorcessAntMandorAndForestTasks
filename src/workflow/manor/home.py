@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from domain_data import AutomationError
+from screen_perception.vision import roaming_chicken_target
 
 REWARD_REGION = (0.0, 0.55, 0.55, 0.9)
 
@@ -16,13 +17,19 @@ class ManorHome:
         obs = s.ensure("manor")
         rewards_given = 0
         for _ in range(s.config.get("max_reward_steps", 30)):
-            if obs.page != "manor" or obs.overlays:
+            if obs.overlays:
+                from workflow.recovery import dismiss
+                obs = dismiss(s, obs)
+            if obs.page != "manor":
                 raise AutomationError("Cannot verify unobstructed manor homepage", "UNKNOWN")
             matches = obs.find("^打赏$", REWARD_REGION)
             if len(matches) > 1:
                 raise AutomationError("Multiple visible reward controls", "AMBIGUOUS")
             if not matches:
                 confirmation = s.observe("reward-absence-confirm")
+                if confirmation.overlays:
+                    from workflow.recovery import dismiss
+                    confirmation = dismiss(s, confirmation)
                 if confirmation.page == "manor" and not confirmation.overlays and not confirmation.has(
                     "^打赏$", REWARD_REGION
                 ):
@@ -33,7 +40,7 @@ class ManorHome:
             before = tuple(e.text for e in obs.find(".", REWARD_REGION))
             obs = s.tap_element(
                 obs, matches[0],
-                lambda after: after.page == "manor" and not after.overlays and (
+                lambda after, before=before: after.page == "manor" and not after.overlays and (
                     not after.has("^打赏$", REWARD_REGION)
                     or tuple(e.text for e in after.find(".", REWARD_REGION)) != before
                 ),
@@ -51,12 +58,20 @@ class ManorHome:
                 raise AutomationError("Cannot confirm chicken is at home", "UNKNOWN")
             s.done(confirmed, skipped=True)
             return
-        s.tap("马上去找", lambda after: after.page == "manor_friend")
-        # The floating '带小鸡回家' text is an instruction, NOT evidence that
-        # its own bounds are a tappable chicken. Capture the friend page and
-        # stop rather than tapping a guessed target on either side.
-        s.observe("roaming-chicken-target-needs-calibration")
-        raise AutomationError("Roaming chicken visual target is not calibrated", "TARGET_UNKNOWN")
+        hint = s.tap("马上去找", lambda after: after.page == "manor_friend")
+        stable = s.observe("roaming-chicken-stable")
+        target = roaming_chicken_target(hint, stable)
+        if target is None:
+            raise AutomationError("Cannot locate pointing-hand cue for roaming chicken", "TARGET_UNKNOWN")
+        obs = s.tap_element(
+            stable,
+            target,
+            lambda after: after.page == "manor" and not after.has("小鸡外出|马上去找"),
+            name="bring-chicken-home",
+            spend=True,
+            detail={"side": "left" if target.point[0] < stable.width / 2 else "right"},
+        )
+        s.done(obs)
 
     def diary(self):
         s = self.s

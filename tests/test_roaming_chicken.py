@@ -2,14 +2,13 @@
 
 import unittest
 
-from domain_data import AutomationError, Observation, Element
+from domain_data import AutomationError, Element, Observation
 from workflow.manor.home import ManorHome
 
 
 class FakeSession:
-    config = {}
-
     def __init__(self):
+        self.config = {}
         self.home = Observation("home", 0, 1440, 3200, "alipay",
                                 [Element("马上去找TA", (600, 1800, 950, 1900), "home")],
                                 page="manor")
@@ -45,7 +44,7 @@ class RoamingChickenTests(unittest.TestCase):
             ManorHome(session).bring_home()
         self.assertEqual(caught.exception.code, "TARGET_UNKNOWN")
         self.assertEqual(session.taps, ["马上去找"])
-        self.assertEqual(session.captures, ["roaming-chicken-target-needs-calibration"])
+        self.assertEqual(session.captures, ["roaming-chicken-stable"])
 
 
 if __name__ == "__main__":
