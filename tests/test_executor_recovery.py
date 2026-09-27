@@ -256,6 +256,47 @@ def test_home_promo_closes_via_its_circle_and_never_back():
     assert close.text == "广告关闭"
 
 
+def test_farm_promo_closes_via_its_circle_and_never_back():
+    # Device evidence (2026-09-26, run 7d8d95): the timed 领3000肥料 card
+    # popped over the auto-jump drawer. Back would abandon the farm whose
+    # drawer has no static entry, so the card closes through the vision
+    # circle only.
+    promo = Observation(
+        "promo", 0.0, 1440, 3200, "alipay",
+        [Element("领3000肥料", (493, 1640, 941, 1722), "promo"),
+         Element("广告关闭", (674, 2329, 764, 2419), "promo")],
+        page="farm", overlays=["farm_promo"],
+    )
+    clear = Observation("clear", 1.0, 1440, 3200, "alipay", [], page="farm")
+
+    class RecordingSession(Session):
+        def __init__(self):
+            super().__init__(SimpleNamespace(), {})
+            self.task = "manor.feed.farm"
+            self.tapped = None
+            self._captures = iter((clear,))
+            self.ex = SimpleNamespace(tap=self._tap)
+
+        def _tap(self, _obs, close, predicate, name, _task, **_kwargs):
+            assert predicate(clear)
+            self.tapped = (name, close)
+
+        def observe(self, _reason="observe"):
+            return next(self._captures)
+
+        def back_observation(self, *_args, **_kwargs):
+            raise AssertionError("Back would abandon the auto-jump drawer")
+
+    session = RecordingSession()
+
+    result = dismiss(session, promo)
+
+    assert result is clear
+    name, close = session.tapped
+    assert name == "close-farm-promo"
+    assert close.text == "广告关闭"
+
+
 def test_furniture_promo_without_its_cta_anchor_fails_closed():
     # The close circle has no OCR text; without the CTA there is nothing
     # to derive its position from, so dismiss must fail visibly instead

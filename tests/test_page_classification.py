@@ -362,3 +362,41 @@ def test_event_period_kitchen_page_classifies_without_its_title():
 
     assert obs.page == "kitchen"
     assert child.page == "ingredient_shop"
+
+
+def test_farm_promo_card_is_a_dismissible_overlay_with_close_control():
+    # Real-device evidence (2026-09-26, run 7d8d95): the timed 领3000肥料
+    # card pops over the freshly opened 做任务集肥料 drawer a couple of
+    # beats after the auto-jump. Its backdrop blur erases the drawer
+    # header, the frame classifies farm from the nav title and card text,
+    # and the router has no farm -> farm_tasks route (the drawer opens
+    # only via the jump) - the card must close through its circle.
+    obs = screen_observation(
+        "farm-promo",
+        ["支付宝·芭芭农场", "肥", "肥", "肥", "领3000肥料",
+         "玩寻道大千砍树20次即得", "限时翻倍", "领肥料"],
+        "farm_promo.jpg",
+    )
+
+    assert obs.page == "farm"
+    assert obs.overlays == ["farm_promo"]
+    close = [element for element in obs.elements if element.text == "广告关闭"]
+    assert len(close) == 1
+    assert abs(close[0].point[0] / obs.width - .50) < .03
+    assert abs(close[0].point[1] / obs.height - .742) < .03
+
+
+def test_farm_entry_welcome_card_is_never_flagged_from_vision_alone():
+    # The entry welcome card (auto-claim countdown) carries no 领N肥料
+    # title; without the text gate its round sacks sit in the same lower
+    # band as the promo close circle and would be dimmed into a phantom
+    # overlay the router keeps trying to close.
+    obs = screen_observation(
+        "farm-welcome",
+        ["支付宝·芭芭农场", "欢迎来到芭芭农场", "1100肥料待领取", "500", "600",
+         "肥", "肥", "明日肥料", "每日签到", "大额肥料", "签到领肥3s"],
+        "farm_welcome.jpg",
+    )
+
+    assert obs.page == "farm"
+    assert obs.overlays == []

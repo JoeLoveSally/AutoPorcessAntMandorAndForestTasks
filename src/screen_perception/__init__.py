@@ -235,6 +235,42 @@ def classify(observation):
                     observation.overlays.append("home_promo")
                     observation.elements.append(
                         close_circle_element(observation, circle, (x0, y0)))
+    # Device evidence (2026-09-26, run 7d8d95): about two beats after the
+    # spec's auto-jump opens the 做任务集肥料 drawer, the timed promo card
+    # (领3000肥料 / 玩寻道大千砍树20次即得 / 限时翻倍) pops as a modal whose
+    # backdrop blur erases the drawer header from OCR - the frame still
+    # classifies farm from the sharp nav title plus the card's 肥料 text,
+    # and row()'s ensure("farm_tasks") then spiraled through parents/Back
+    # to its budget: the drawer opens only via the auto-jump, so no route
+    # leads back. The drawer stays alive under the modal; its close circle
+    # floats below the card at ~74% screen height. The card title gates
+    # the scan so the entry welcome card's 1100肥料待领取 and the farm
+    # home's own labels can never trigger it.
+    if observation.page == "farm" and observation.has(r"领\d+肥料") \
+            and observation.image is not None:
+        image = observation.image
+        h, w = image.shape[:2]
+        x0, y0 = int(w * .35), int(h * .62)
+        crop = cv2.cvtColor(image[y0:int(h * .86), x0:int(w * .65)], cv2.COLOR_BGR2GRAY)
+        if crop.size:
+            blurred = cv2.GaussianBlur(crop, (5, 5), 1.2)
+            circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, 1.2, 80,
+                                       param1=100, param2=45,
+                                       minRadius=max(20, int(w * .025)),
+                                       maxRadius=max(40, int(w * .06)))
+            if circles is not None:
+                expected = (crop.shape[1] / 2, crop.shape[0] * .50)
+                circle = min(
+                    circles[0],
+                    key=lambda item: (float(item[0]) - expected[0]) ** 2
+                    + (float(item[1]) - expected[1]) ** 2,
+                )
+                distance = ((float(circle[0]) - expected[0]) ** 2
+                            + (float(circle[1]) - expected[1]) ** 2) ** .5
+                if distance <= w * .07:
+                    observation.overlays.append("farm_promo")
+                    observation.elements.append(
+                        close_circle_element(observation, circle, (x0, y0)))
     return observation
 
 

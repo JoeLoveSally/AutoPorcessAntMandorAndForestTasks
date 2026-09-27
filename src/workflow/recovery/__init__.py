@@ -38,13 +38,18 @@ def dismiss(session, observation=None):
                 recover=False,
             )
         elif any(kind in obs.overlays
-                 for kind in ("manor_ad", "forest_campaign", "home_promo")):
+                 for kind in ("manor_ad", "forest_campaign", "home_promo",
+                              "farm_promo")):
             # Homepage ads retain the manor page underneath and forest campaign
             # modals retain the forest home, so the close circle created by the
             # current observation's vision rule cannot become stale across
             # stacked overlays. The Alipay-home coupon card (2026-09-25,
             # run 41640d) joins them: Back on the home would exit the app.
-            kind = next(kind for kind in ("manor_ad", "forest_campaign", "home_promo")
+            # The farm promo card (2026-09-26, run 7d8d95) closes the same
+            # way: Back would abandon the farm whose auto-jump drawer has
+            # no static entry to return to.
+            kind = next(kind for kind in ("manor_ad", "forest_campaign",
+                                          "home_promo", "farm_promo")
                         if kind in obs.overlays)
             close = next((e for e in obs.elements if e.text == "广告关闭"), None)
             if close is None:
