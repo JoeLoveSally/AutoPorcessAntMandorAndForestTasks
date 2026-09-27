@@ -22,6 +22,28 @@ def _load_frame_texts(session, run, frame_id):
         return None
 
 
+def _load_run_proof(session, run, after_frame, pattern):
+    """First later frame of ``run`` matching ``pattern``, or None.
+
+    The runner records every frame a submission produced (same directory
+    as the before frame), so a postcondition that timed out on the wrong
+    text still left durable proof of what the app actually answered -
+    frame ids sort zero-padded, and any read failure means "no proof".
+    """
+    try:
+        root = session.ex.observer.directory.parent
+        frame_ids = sorted(p.stem for p in (root / run).glob("*.json"))
+    except OSError:
+        return None
+    for frame_id in frame_ids:
+        if frame_id <= after_frame:
+            continue
+        texts = _load_frame_texts(session, run, frame_id)
+        if texts is not None and any(re.search(pattern, t) for t in texts):
+            return frame_id
+    return None
+
+
 class Manor:
     def __init__(self, session):
         self.s = session
@@ -303,38 +325,139 @@ class Manor:
             s.done(obs, already=True)
             return
         s.tap_element(obs, button, lambda o:o.page == "kitchen", name="kitchen-open")
+        # Device evidence (2026-09-26, runs e480ea -> 4a78d9): e480ea's
+        # claim timed out behind the pantry dialog and stayed
+        # RESULT_UNKNOWN, so store.intent()'s guard rejected the retry's
+        # first claim before it could fire (4a78d9 died at the intent).
+        # The daily claim affordance is durable evidence of that stale
+        # submission's fate: it still offering the claim proves the tap
+        # never took effect (cancel), the affordance consumed proves it
+        # did (verify so later spends of this task can fire) - the same
+        # state-anchored reconciliation the lottery confirm got on 09-25.
+        # Any other stale action keeps blocking fail-closed.
+        if s.ex.store.unresolved(s.task):
+            consumed = not s.obs.has("领今日食材")
+            for action_id, name, before_id, run in s.ex.store.pending_frames(s.task):
+                if name in ("领今日食材", "领取食材", "pantry-confirm"):
+                    s.ex.store.action(action_id, "VERIFIED" if consumed else "CANCELLED",
+                                      s.obs.id)
+                    continue
+                if name != "做美食":
+                    continue
+                # Device evidence (2026-09-25, runs 3496e7 -> 295962): with
+                # the chickens out the 做美食 tap is refused behind a ~2s
+                # toast (小鸡不在家哦，等它回来) the runner's cadence missed, so
+                # the postcond starved and left RESULT_UNKNOWN that then
+                # blocked every later spend of this task. The refusal proof
+                # is the submission's own before frame: it records the
+                # out-state bubble at tap time, so cancel on that evidence
+                # even once the chickens have walked back.
+                texts = _load_frame_texts(s, run, before_id)
+                if texts is not None and any(
+                        re.search(r"主人，我出去啦|小鸡不在家", t) for t in texts):
+                    s.ex.store.action(action_id, "CANCELLED", before_id)
+                    continue
+                # Device evidence (2026-09-26, run 780c45): that run's cook
+                # DID succeed - its own post-tap frames carry the result
+                # modal (金枪鱼海苔卷制作成功 / 厨余生成了60肥料) - the postcond
+                # just asked for text the device never renders. Prove the
+                # submission took effect from that durable record and
+                # verify it here, before the first spend trips the guard.
+                # Anything else stays fail-closed: no proof, no cancel.
+                proof = _load_run_proof(s, run, before_id, r"制作成功|厨余生成|查看图鉴")
+                if proof is not None:
+                    s.ex.store.action(action_id, "VERIFIED", proof)
         for pattern in ("领今日食材", "领取食材"):
             if s.obs.has(pattern):
-                s.tap(pattern, lambda o,p=pattern:o.page == "kitchen" and not o.has(p), spend=True)
+                # Device evidence (2026-09-26, run e480ea): a nearly-full
+                # pantry answers the claim with its own confirm dialog
+                # (食材快放不下啦 / 当前仅能装下50g食材 / 确认领取今日食材吗？
+                # + 确认 at [665,1814]) whose body leaves the 领今日食材
+                # button OCR-visible, so the plain not-has postcondition
+                # starved until timeout. Accept the dialog as the claim
+                # proceeding, then anchor its own ^确认$ - the body also
+                # carries 确认 (run e5bb6b failed that unanchored) - just
+                # like the sign near-full confirm; the frame still
+                # classifies kitchen behind the dialog, so no allow_unknown.
+                s.tap(pattern,
+                      lambda o,p=pattern:o.page == "kitchen"
+                      and (not o.has(p) or o.has("快放不下|确认领取")),
+                      spend=True)
+                if s.obs.has("快放不下|确认领取"):
+                    s.tap(r"^确认$",
+                          lambda o:o.page == "kitchen"
+                          and not o.has("快放不下|确认领取"),
+                          spend=True, name="pantry-confirm")
         s.tap("爱心食材店", lambda o:o.page == "ingredient_shop")
+        # Same affordance-anchored reconciliation for the shop claim: a
+        # stale 领10g食材 submission is cancelled while the shop still
+        # offers the claim and verified once the affordance is consumed -
+        # otherwise it deadlocks the task's later spends with no resolver
+        # before done().
+        if s.ex.store.unresolved(s.task):
+            consumed = not s.obs.has("领10g食材")
+            for action_id, name, _, _ in s.ex.store.pending_frames(s.task):
+                if name == "领10g食材":
+                    s.ex.store.action(action_id, "VERIFIED" if consumed else "CANCELLED",
+                                      s.obs.id)
+        shop_refused = False
         if s.obs.has("领10g食材"):
-            s.tap("领10g食材", lambda o:not o.has("领10g食材"), spend=True)
+            # The shop claim can meet the same near-full dialog family -
+            # or, with the bag at its 300g cap, a refusal toast
+            # (2026-09-26, run 6bafea: 食材袋放不下了，使用后再领取吧,
+            # OCR-split but anchored on 食材袋放不下) that overlays the
+            # still-OCR-visible button. Both are answers: accept them as
+            # the submission resolved instead of starving for not-has.
+            s.tap("领10g食材",
+                  lambda o:not o.has("领10g食材")
+                  or o.has("快放不下|确认领取|食材袋放不下"),
+                  spend=True)
+            if s.obs.has("快放不下|确认领取"):
+                s.tap(r"^确认$",
+                      lambda o:not o.has("快放不下|确认领取"),
+                      spend=True, name="pantry-confirm")
+            elif s.obs.has("食材袋放不下"):
+                # The toast advises using ingredients first - the cooks
+                # below free bag space, so take one claim retry after
+                # them rather than losing the daily 10g.
+                shop_refused = True
         s.back(("kitchen",))
-        # Device evidence (2026-09-25, runs 3496e7 -> 295962): with the
-        # chickens out (kitchen bubble 主人，我出去啦) the 做美食 tap is
-        # refused by the app behind a ~2s toast 小鸡不在家哦，等它回来 -
-        # caught only by a manual capture, the runner's ~4s cadence missed
-        # all seven post-tap frames - so the gallery postcond starved and
-        # left '做美食' RESULT_UNKNOWN, which then blocked every later spend
-        # of this task (295962 died at the intent before tapping). The
-        # refusal proof is the submission's own before frame: it records
-        # the out-state bubble at tap time, so cancel on that evidence
-        # even once the chickens have walked back. The live bubble only
-        # skips the cook (never tap into a refusal), and a submission
-        # fired from a normal frame keeps blocking behind the intent
-        # guard - no proof, no cancel.
-        for action_id, name, before_id, run in s.ex.store.pending_frames(s.task):
-            if name != "做美食":
-                continue
-            texts = _load_frame_texts(s, run, before_id)
-            if texts is not None and any(
-                    re.search(r"主人，我出去啦|小鸡不在家", t) for t in texts):
-                s.ex.store.action(action_id, "CANCELLED", before_id)
+        # The stale 做美食 pendings resolved at entry; the live out-state
+        # bubble (kitchen 主人，我出去啦) only skips the cook - never tap
+        # into a refusal the app will just reject again.
         if s.obs.has("主人，我出去啦|小鸡不在家"):
             s.done(s.obs, skipped=True)
             return
         for index in range(2):
-            s.tap("做美食", lambda o:o.has("美食图鉴"), spend=True, detail={"meal":index+1})
-            s.back(lambda o:o.page == "kitchen" and not o.has("美食图鉴"))
+            # Device evidence (2026-09-26, run 780c45): the device never
+            # renders the spec's 美食图鉴 gallery - the tap cooks directly
+            # and answers with a result modal (金枪鱼海苔卷制作成功 +
+            # 查看图鉴 + 厨余生成了60肥料, frame 0031). Accept either
+            # outcome as the cook's proof.
+            s.tap("做美食",
+                  lambda o:o.has("美食图鉴") or o.has("制作成功|厨余生成|查看图鉴"),
+                  spend=True, detail={"meal":index+1})
+            # The modal must actually go before the next tap: its frame
+            # can classify kitchen with no 美食图鉴 text, which the old
+            # predicate accepted without pressing back - leaving the
+            # modal up to swallow the following tap.
+            s.back(lambda o:o.page == "kitchen"
+                   and not o.has("美食图鉴|制作成功|厨余生成|查看图鉴"))
+        if shop_refused:
+            # The bag-full refusal (above) deferred the free 10g claim
+            # until ingredients were used; the cooks just used some, so
+            # honor the toast's own advice with a single claim retry.
+            # A second refusal is equally an answer - accept and move on.
+            s.tap("爱心食材店", lambda o:o.page == "ingredient_shop")
+            if s.obs.has("领10g食材"):
+                s.tap("领10g食材",
+                      lambda o:not o.has("领10g食材")
+                      or o.has("快放不下|确认领取|食材袋放不下"),
+                      spend=True)
+                if s.obs.has("快放不下|确认领取"):
+                    s.tap(r"^确认$",
+                          lambda o:not o.has("快放不下|确认领取"),
+                          spend=True, name="pantry-confirm")
+            s.back(("kitchen",))
         s.back(("feed",))
         s.complete_row("小鸡厨房")
