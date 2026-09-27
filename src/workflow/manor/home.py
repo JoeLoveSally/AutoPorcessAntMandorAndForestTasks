@@ -2,10 +2,46 @@
 
 from __future__ import annotations
 
-from domain_data import AutomationError
+import re
+
+from domain_data import AutomationError, Element
 from screen_perception.vision import roaming_chicken_target
 
 REWARD_REGION = (0.0, 0.55, 0.55, 0.9)
+# The chicken-out sign has two observed boards: the roaming variant
+# (小鸡外出探险了 with a 马上去找TA CTA, run 0aa57b on 09-20) and the
+# employed variant (a bare 小鸡出去工作啦 board with no CTA, run 6b3fa4
+# on 09-26). One pattern gates detection, the CTA preference, and the
+# bring-home success check.
+CHICKEN_OUT = "马上去找|小鸡外出|小鸡出去工作啦"
+
+
+def own_chicken_label_target(obs):
+    """Locate my chicken through its label at the host manor.
+
+    Device evidence (2026-09-26, run 130950): the employed arrival shows
+    every guest chicken's label in a narrow band around y=.58h - the other
+    guest reads TA好友的小鸡 while mine reads 不理鸡 (its name; the diary's
+    名字 field shows the same on 09-20 and the label rides home with it),
+    i.e. mine is the band label that does not end in 的小鸡. The body sits
+    under the tag: the proven tap (554,1925) is the label center (530,1850)
+    plus 75px. The cx window keeps the 蚂蚁新村 sign (.92w) out.
+    """
+    for element in obs.find("."):
+        left, top, right, bottom = element.bounds
+        cx, cy = (left + right) / 2, (top + bottom) / 2
+        if not .52 * obs.height < cy < .65 * obs.height:
+            continue
+        if not .15 * obs.width < cx < .85 * obs.width:
+            continue
+        if re.search("的小鸡$", element.text):
+            continue
+        if not re.fullmatch("[\\u4e00-\\u9fff]{2,8}", element.text):
+            continue
+        tx, ty = int(cx), int(cy + 75)
+        return Element("外出小鸡", (tx - 50, ty - 50, tx + 50, ty + 50),
+                       obs.id, "label.roaming_chicken", .7)
+    return None
 
 
 class ManorHome:
@@ -52,21 +88,34 @@ class ManorHome:
     def bring_home(self):
         s = self.s
         obs = s.ensure("manor")
-        if not obs.has("马上去找|小鸡外出"):
+        if not obs.has(CHICKEN_OUT):
             confirmed = s.observe("chicken-home-confirm")
-            if confirmed.page != "manor" or confirmed.overlays or confirmed.has("马上去找|小鸡外出"):
+            if confirmed.page != "manor" or confirmed.overlays or confirmed.has(CHICKEN_OUT):
                 raise AutomationError("Cannot confirm chicken is at home", "UNKNOWN")
             s.done(confirmed, skipped=True)
             return
-        hint = s.tap("马上去找", lambda after: after.page == "manor_friend")
+        # Device evidence (2026-09-26, run 6b3fa4): the employed board
+        # carries no CTA - tapping the board text itself ([684,1720,904,1758]
+        # -> (794,1739)) jumped straight to the host manor. Prefer the CTA
+        # when the roaming variant shows it (device-proven 09-20).
+        if obs.has("马上去找"):
+            hint = s.tap("马上去找", lambda after: after.page == "manor_friend")
+        else:
+            hint = s.tap("小鸡出去工作啦|小鸡外出",
+                         lambda after: after.page == "manor_friend")
         stable = s.observe("roaming-chicken-stable")
         target = roaming_chicken_target(hint, stable)
+        if target is None:
+            # Device evidence (2026-09-26, run 130950): the employed
+            # arrival carries no pointing hand either, so the vision cue
+            # finds nothing - fall back to my chicken's own label.
+            target = own_chicken_label_target(stable)
         if target is None:
             raise AutomationError("Cannot locate pointing-hand cue for roaming chicken", "TARGET_UNKNOWN")
         obs = s.tap_element(
             stable,
             target,
-            lambda after: after.page == "manor" and not after.has("小鸡外出|马上去找"),
+            lambda after: after.page == "manor" and not after.has(CHICKEN_OUT),
             name="bring-chicken-home",
             spend=True,
             detail={"side": "left" if target.point[0] < stable.width / 2 else "right"},
