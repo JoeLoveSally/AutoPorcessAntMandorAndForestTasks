@@ -1,5 +1,71 @@
 # 真机校准记录
 
+## 2026-09-26：厨房真机结果模态、外出木牌双变体与日记本全帧取证
+
+- 全天终态：**18 SUCCESS** + 3 ALREADY_DONE（sign/farm/kitchen）+ 2 SKIPPED
+  （reward_friends 无打赏落账属条件语义；bring_home 的 SKIPPED 是缺陷，见下）+
+  1 FAILED（diary）。
+- `manor.home.bring_home` `6b3fa4` **SKIPPED 而鸡实际外出**：旧判定式
+  `马上去找|小鸡外出` 不含雇主木牌 `小鸡出去工作啦`，入口漏检→落"确认在家"支、
+  同式再漏检→以 SKIPPED 收场。修复三件套：`CHICKEN_OUT = 马上去找|小鸡外出|
+  小鸡出去工作啦` 统一三处；CTA 缺失时改点木牌文本（130950 实测 (794,1739)
+  直跳好友庄园）；好友页无指向手线索时回退 `own_chicken_label_target()`——
+  y 带 .52-.65h 内取不以"的小鸡"结尾的标签（我的 不理鸡），标签中心 +75px =
+  实测点击位，cx 窗口排除 .92w 的蚂蚁新村牌。13:11 人工带回家时先误点右侧
+  客鸡给茵茵发了"提醒"，后按左槽标签带回家。test_roaming_chicken +2。
+- `manor.feed.farm` `7d8d95` FAILED：自动跳转的"做任务集肥料"抽屉开约 2 拍后
+  限时卡（领3000肥料/玩寻道大千砍树20次即得）全屏模态弹出，背景模糊抹掉抽屉
+  头，帧仍凭导航标题分类 farm，`ensure("farm_tasks")` 无路回旋至预算尽。修复 =
+  classify 新增 `farm_promo`（`page=farm ∧ 领\d+肥料` 文字门 + 62%-86% 高度带
+  Hough 圆 + 期望位距 ≤ .07w），dismiss 加入 farm_promo **只走圆点绝不 Back**
+  （抽屉仅自动跳转可达）；文字门保证入场欢迎卡（1100肥料待领取）永不误触。
+  test_page_classification +2（含真机帧 farm_promo/farm_welcome 固定证据）、
+  test_executor_recovery +1。`f250cf` 复跑 ALREADY_DONE。
+- `manor.feed.kitchen` 六轮收官（`e480ea`→`4a78d9`→`6bafea`→`780c45`→
+  `d6fba9`→`756696` **ALREADY_DONE**），四个独立根因：
+  1. `e480ea` 撞近满食材确认框（食材快放不下啦/仅能装下50g + `^确认$`），
+     postcond 等 not-has 饿死；其 RESULT_UNKNOWN 留存又让 `4a78d9` 被 intent
+     守卫拒发首点。修复 = 入口 affordance 对账（领今日食材仍供给 ⇒ 当时提交
+     未生效 CANCELLED；consumed ⇒ VERIFIED）+ 确认框支（锚 `^确认$`，同签到
+     近满支）。做美食 stale 同入口解决：out-bubble 取消（before 帧记录点击时
+     气泡）→ own-run proof（`_load_run_proof()` 按帧序取首个后帧匹配
+     `制作成功|厨余生成|查看图鉴`，780c45 的提交以 after=0020-5016a6 VERIFIED）
+     → 否则 fail-closed。
+  2. `6bafea` 撞 300g 满袋 toast（食材袋放不下啦，使用后再领取吧）——按钮仍
+     OCR 可见饿死 postcond。修复 = 接受 toast 为应答，置 shop_refused，两轮
+     烹饪后按 toast 自己的建议重试一次领取，二次拒绝同样照单全收。
+  3. `780c45` 根因：**真机不渲染 spec 的 美食图鉴 画廊**——点 做美食 直接出
+     结果模态（金枪鱼海苔卷制作成功 + 厨余生成了60肥料 + 查看图鉴，帧 0031）。
+     修复 = postcond 双收（`美食图鉴` or `制作成功|厨余生成|查看图鉴`）；back
+     谓词同步排除模态——模态帧也分类 kitchen 且无 美食图鉴 文本，旧谓词会放行
+     留着模态吞掉下一点。
+  4. `d6fba9` 败 `Postcondition failed: launch; page=UNKNOWN`：14:11 静默唤醒
+     未验证、屏已锁（末帧仅时钟），launch 只拉支付宝不解键盘锁。教训固化 =
+     任务前 `WAKEUP → dismiss-keyguard → mWakefulness=Awake` 三步验证，并加
+     `svc power stayon usb` 防跑批中段落锁。
+  最终 `756696`：行已呈 领取（单次烹饪后，device truth > spec 两次演示），
+  id=109 经 own-run proof VERIFIED、id=108 经 executor VERIFIED，全任务 0 未决；
+  行 领取 不点（L21）。kitchen 部分实机全链走通。
+- `manor.home.diary` 两轮 FAILED（`13f996` 鸡外出 / `61530c` 鸡在家），全帧取证：
+  1. **书真不在**：真书模板（取 09-24 成功帧书像素）匹配成功日 1.000/0.937，
+     当日 10:55/11:12/13:16/14:20×2/14:42 全 ≤ 0.58 背景级；松红全帧扫描
+     （HSV S≥80）在预期位 [955,1665,1101,1740] 无候选；三时刻裁剪目视为空
+     草地。11:12 与 09-25 21:26 的 vision 命中是**红心道具误检**（元素
+     [1075,1937,1193,2035]，质心 y≈1986 贴 y 带 .62h=1984 边缘，滚动差 2px
+     决定过门）——09-25 21:26 那轮点心无果、postcond 空转的败因即此。
+  2. **书会十秒级闪现**：09-21 09:25 `662f0d` 0001 帧书在（模板 0.953 + 红点）
+     且 vision 命中 `小鸡日记`，10 秒后 before 步 0002 无遮挡消失（0.543）→
+     found 0 败；09:27 `3e9972` 复现并成功。
+  3. **历史相关性**：鸡在家 ⇔ 书在（09-20/21/24 全部观测），鸡外出 ⇒ 书不在
+     （09-25 ×3、09-26 10:55、09-24 10:44 带回前帧）；09-24 10:45 带回后
+     10:46 书在，demo 视频同语义（t32 回家 → t34 书现）。
+  4. **异常未解**：09-26 13:11 人工带回家（页面开着、与 09-24 同机制）后
+     13:16 书未生成，此后全缺；用户确认未做贴贴，fail-closed FAILED 挂起。
+     假说（未证）：书以"昨日日记条目"服务端生成为前提，09-25 全天外出/外宿
+     可能无条目。09-27 12:16 复跑仍 4 帧全无、60s×20 高频采样无闪现（续诊）。
+- 晚间 USB 掉线（usbipd 总线 1-2 消失、adb 空），次日重插 + detach/attach 恢复。
+- 门禁：ruff clean，**166 passed**。
+
 ## 2026-09-25：日记本缺位、锁屏窗口与全天 24 项收官
 
 - 当日首批：`faeeca` `manor.home.reward_friends` **SKIPPED**（区域内 0 个 `^打赏$`，
