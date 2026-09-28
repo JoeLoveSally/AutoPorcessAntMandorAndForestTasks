@@ -599,8 +599,55 @@ class Forest:
                 choices = obs.find("送TA机会|送Ta机会|送他机会")
                 if not choices:
                     raise AutomationError("No first friend gift opportunity")
-                s.tap_element(obs, min(choices,key=lambda e:(e.point[1],e.point[0])),
-                              lambda o:o.page == "rain" and o.has("[立三主]即开[始启]"),
-                              name="rain-gift", spend=True)
+                # Device evidence (2026-09-27, run c59b7f): the panel carries
+                # three same-text 送TA机会 buttons (the tutorial hand covers
+                # the leftmost) and min-by-(y,x) tapped the middle one, which
+                # sat dead for 40s while the identical right button had
+                # answered the day before (run 06fb5b, point (936,1807)); the
+                # friend row rotates daily, so any button can be the dead
+                # one. Walk candidates rightmost first: an attempt that times
+                # out with the panel still offering the affordance proves the
+                # submission never took effect - cancel it and try the next
+                # button; a panel that closed after the wait was a slow
+                # success instead.
+                sent = False
+                tried = []
+                last = None
+                pending = sorted(choices, key=lambda e: -e.point[0])
+                while pending:
+                    choice = pending.pop(0)
+                    if any(abs(choice.point[0] - x) < 40 and abs(choice.point[1] - y) < 40
+                           for x, y in tried):
+                        continue
+                    tried.append(choice.point)
+                    try:
+                        s.tap_element(obs, choice,
+                                      lambda o:o.page == "rain"
+                                      and o.has("[立三主]即开[始启]"),
+                                      name="rain-gift", spend=True)
+                        sent = True
+                        break
+                    except AutomationError as exc:
+                        if exc.code != "TIMEOUT":
+                            raise
+                        last = exc
+                        obs = s.observe("rain-gift-retry")
+                        if obs.page == "rain" and obs.has("[立三主]即开[始启]"):
+                            sent = True
+                            break
+                        if s.ex.store.unresolved(s.task):
+                            for action_id, name, _, _ in s.ex.store.pending_frames(s.task):
+                                if name == "rain-gift":
+                                    s.ex.store.action(action_id, "CANCELLED", obs.id)
+                        pending = [
+                            element for element
+                            in obs.find("送TA机会|送Ta机会|送他机会")
+                            if not any(abs(element.point[0] - x) < 40
+                                       and abs(element.point[1] - y) < 40
+                                       for x, y in tried)
+                        ]
+                        pending.sort(key=lambda e: -e.point[0])
+                if not sent:
+                    raise last or AutomationError("No first friend gift opportunity")
         s.done()
         s.back(("forest",))
