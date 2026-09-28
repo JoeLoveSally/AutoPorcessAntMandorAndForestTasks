@@ -22,6 +22,7 @@ class FakeExecutor:
         self.observer = SimpleNamespace(capture=lambda _reason: next(self._stream))
         self.budget = SimpleNamespace(check=lambda: None)
         self.back_calls = []
+        self.back_allow_unknown = []
         self.tap_calls = []
         self.wait_calls = []
 
@@ -41,6 +42,7 @@ class FakeExecutor:
         assert predicate(after), "the observed landing page must satisfy back's postcondition"
         assert not predicate(obs), "staying on the same page must not satisfy back"
         self.back_calls.append((obs.id, predicate, name))
+        self.back_allow_unknown.append(allow_unknown)
         return after
 
     def tap(self, obs, element, predicate, name, task, **kwargs):
@@ -153,4 +155,25 @@ def test_family_route_ignores_the_encouragement_card_phrase():
     session = Session(executor, {"package": "alipay"})
 
     assert session.ensure("family_tasks") is tasks
+    assert executor.tap_calls == ["[立三主]即签到|^攒亲密度$"]
+
+
+def test_ensure_backs_through_a_transient_unknown_departure_frame():
+    # Device evidence (2026-09-28, run d1da54): the donation's follow-up
+    # Back re-observed the detail page mid-re-render as UNKNOWN (0022
+    # donate_detail -> 0023 UNKNOWN) and the validator refused to press at
+    # all. The parents-branch Back must tolerate that transient departure
+    # frame - the predicate still guards the landing, excluding UNKNOWN.
+    detail = observation("1", page="donate_detail")
+    glitch = observation("2", page="UNKNOWN")
+    family = observation("3", page="family")
+    family_before_tap = observation(
+        "4", [("三即签到", (599, 2951, 848, 3012))], page="family")
+    tasks = observation("5", [("攒亲密度", (300, 2600, 620, 2700))],
+                        page="family_tasks")
+    executor = FakeExecutor([detail, glitch, family, family_before_tap, tasks])
+    session = Session(executor, {"package": "alipay"})
+
+    assert session.ensure("family_tasks") is tasks
+    assert executor.back_allow_unknown == [True]
     assert executor.tap_calls == ["[立三主]即签到|^攒亲密度$"]

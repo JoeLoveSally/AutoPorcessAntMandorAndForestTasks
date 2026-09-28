@@ -213,3 +213,31 @@ def test_row_falls_back_to_the_button_column_when_ocr_misses_the_pill(
     x, y = button.point
     assert 1108 <= x <= 1353
     assert y == 2485  # the title's center plus the +35 offset of both twins
+
+
+def test_optional_row_absent_when_the_scroll_budget_expires():
+    # Device evidence (2026-09-28, run 77dae5): the farm drawer's rotating
+    # campaign banner rewrites the frame signature on every capture, so
+    # no_progress never reaches 2, no footer ever renders, and the scroll
+    # budget dies on the loop head - the row is absent just as surely as
+    # the footer and stable-view paths say, and an optional row must skip
+    # instead of raising on the third confirmation path.
+    frames = [observation(str(index), ["饲料任务", f"其他任务{index % 2}"])
+              for index in range(1, 12)]
+    session = ScanningSession(frames)
+
+    _, title, button = session.row("不存在的可选任务", required=False)
+
+    assert title is None
+    assert button is None
+
+
+def test_required_row_missing_when_the_scroll_budget_expires_fails_closed():
+    # The same budget death must stay fail-closed for a required row: an
+    # oscillating view is not proof that a task exists elsewhere.
+    frames = [observation(str(index), ["饲料任务", f"其他任务{index % 2}"])
+              for index in range(1, 12)]
+    session = ScanningSession(frames)
+
+    with pytest.raises(AutomationError, match="Cannot confirm complete scan"):
+        session.row("庄园小课堂")

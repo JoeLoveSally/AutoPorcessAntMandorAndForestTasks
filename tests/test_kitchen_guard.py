@@ -497,3 +497,46 @@ def test_load_run_proof_finds_the_first_later_matching_frame(tmp_path):
     assert manor_daily._load_run_proof(
         session, "20260926-never", "0029-8a7cec",
         r"制作成功|厨余生成|查看图鉴") is None
+
+
+class FeedExitingKitchen(FakeKitchen):
+    # Device evidence (2026-09-28, run b2acc0): one Back from the cook
+    # result exited the whole kitchen H5 for the feed (0029 modal still up
+    # -> 0030 page=feed), so the kitchen-only dismissal predicate starved
+    # on the landing it produced and cook 2 never ran.
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tuple_backs = []
+        self.reopen_taps = []
+
+    def tap_element(self, obs, button, predicate, **kwargs):
+        self.reopen_taps.append(kwargs.get("name"))
+        super().tap_element(obs, button, predicate, **kwargs)
+
+    def back(self, target, **kwargs):
+        if callable(target):
+            # The cook dismissal may land on the feed - that is the whole
+            # point of the widened predicate.
+            assert not target(self.obs)
+            landing = self.feed
+            assert target(landing)
+            self.obs = landing
+            return self.obs
+        self.tuple_backs.append(target)
+        self.obs = self.kitchen_frame if "kitchen" in target else self.home
+        return self.obs
+
+
+def test_cook_back_exits_to_the_feed_and_the_next_cook_reopens():
+    # The loop re-enters through the feed row for the second cook, and the
+    # final ("feed",) Back never fires on a page that already is the feed -
+    # pressing it there would exit the whole app.
+    session = FeedExitingKitchen(kitchen_home(), cook_frame=cook_result_modal())
+
+    Manor(session).kitchen()
+
+    meals = [kwargs for name, kwargs in session.taps if name == "做美食"]
+    assert [m.get("detail") for m in meals] == [{"meal": 1}, {"meal": 2}]
+    assert session.reopen_taps == ["kitchen-open", "kitchen-reopen"]
+    assert session.tuple_backs == [("kitchen",)]
+    assert session.complete_rows == ["小鸡厨房"]

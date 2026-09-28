@@ -30,6 +30,7 @@ class Stop(Exception):
 class FarmSession:
     def __init__(self):
         self.task = "manor.feed.farm"
+        self.absent = set()
         self.home = observation("home", ["支付宝·芭芭农场", "施肥", "肥料"],
                                 "farm")
         self.drawer = observation("drawer", ["做任务集肥料", "每日签到",
@@ -45,6 +46,8 @@ class FarmSession:
 
     def row(self, title, required=True, reset=False, page="feed"):
         self.row_calls.append(title)
+        if title in self.absent:
+            return self.obs, None, None
         text = "去完成" if title == "^去芭芭农场" else "领取"
         anchor = Element(title, (100, 400, 900, 470), "row")
         button = Element(text, (1150, 900, 1350, 970), "row")
@@ -83,6 +86,23 @@ def test_farm_waits_for_the_spec_auto_jump_before_drawer_claims():
         Manor(session).farm()
 
     assert session.wait_calls == ["farm-jump"]
-    assert session.row_calls == ["^去芭芭农场", "每日签到", "蚂蚁庄园小鸡肥料"]
+    assert session.row_calls == ["^去芭芭农场", "蚂蚁庄园小鸡肥料", "每日签到"]
     assert session.claim_taps == 2
+    assert session.backs == [("farm",)]
+
+
+def test_absent_sign_row_is_skipped_and_the_durable_claim_still_fires():
+    # Device evidence (2026-09-28, run 77dae5): the welcome card's
+    # countdown auto-claimed the sign before the jump, and the drawer then
+    # rendered no 每日签到 row at all across 34 frames - the loop must skip
+    # it (required=False + the None guard) and still claim the manure row
+    # that IS there with its 领取 pill.
+    session = FarmSession()
+    session.absent = {"每日签到"}
+
+    with pytest.raises(Stop):
+        Manor(session).farm()
+
+    assert session.row_calls == ["^去芭芭农场", "蚂蚁庄园小鸡肥料", "每日签到"]
+    assert session.claim_taps == 1
     assert session.backs == [("farm",)]

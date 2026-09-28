@@ -263,8 +263,17 @@ class Session:
                 # the configured parent is only a hint. Accept any newly
                 # recognized page and re-plan the route from observed reality.
                 start = obs.page
+                # Device evidence (2026-09-28, run d1da54): the donation's
+                # follow-up Back re-observed the detail page mid-re-render
+                # as UNKNOWN (0022 donate_detail -> 0023 UNKNOWN) and the
+                # validator refused to press at all. Back is
+                # non-destructive navigation and the predicate guards the
+                # landing (it still excludes UNKNOWN), so a transient
+                # departure frame is pressable - the same stance as the
+                # UNKNOWN branch above.
                 obs = self.back(
-                    lambda o, start=start: o.page != start and o.page != "UNKNOWN"
+                    lambda o, start=start: o.page != start and o.page != "UNKNOWN",
+                    allow_unknown=True
                 )
             else:
                 raise AutomationError(f"No verified navigation from {obs.page} to {target}", "UNKNOWN")
@@ -371,6 +380,14 @@ class Session:
                 if not required:
                     return obs, None, None
                 raise AutomationError(f"Required task missing after complete scan: {title}")
+        # Device evidence (2026-09-28, run 77dae5): the farm drawer's
+        # rotating campaign banner rewrites the frame signature on every
+        # capture, so no_progress never reaches 2 and the scroll budget
+        # dies on the loop head with the row genuinely absent - the same
+        # "not there" verdict as the two confirmed paths above, which
+        # already let an optional row skip.
+        if not required:
+            return obs, None, None
         raise AutomationError(f"Cannot confirm complete scan for {title}", "UNKNOWN")
 
     def complete_row(self, title, page="feed", claim=False):

@@ -306,10 +306,28 @@ class Manor:
         # wait for it, claim the drawer rows, back out, fertilize the
         # settled home.
         s.wait(lambda o:o.page == "farm_tasks", "farm-jump")
-        for title in ("每日签到", "蚂蚁庄园小鸡肥料"):
-            obs, _, button = s.row(title, page="farm_tasks")
+        # Device evidence (2026-09-28, run 77dae5): the welcome card's own
+        # countdown (签到领肥3s -> 1s, frames 0011/0012) auto-claims the
+        # sign before the jump lands, and the drawer's sign strip then
+        # renders 已领取 with no 每日签到 row at all - absent from all 34
+        # drawer frames while the rest of the OCR reads clean (the strip's
+        # day cells 600/600/600 plus 已领取 sit at the drawer top instead).
+        # The sign claim is therefore optional; the manure row leads
+        # because it is the durable one (title + 领取 paired at frames
+        # 0016-0019 today), and the claim verifies by the pill itself
+        # flipping - the strip's standing 已领取 would make a plain
+        # has("已领取") vacuously true.
+        for title in ("蚂蚁庄园小鸡肥料", "每日签到"):
+            obs, _, button = s.row(title, required=False, page="farm_tasks")
+            if button is None:
+                continue
             if button.text == "领取":
-                s.tap_element(obs, button, lambda o:o.page == "farm_tasks" and o.has("已领取"),
+                pill = button
+                s.tap_element(obs, button,
+                              lambda o, pill=pill:o.page == "farm_tasks"
+                              and not any(e.text == pill.text
+                                          and abs(e.point[1] - pill.point[1]) < 20
+                                          for e in o.elements),
                               name="fertilizer-claim", spend=True)
         s.back(("farm",))
         if s.obs.has("点击领取"):
@@ -436,6 +454,19 @@ class Manor:
             s.done(s.obs, skipped=True)
             return
         for index in range(2):
+            if s.obs.page != "kitchen":
+                # Device evidence (2026-09-28, run b2acc0): one Back from
+                # the cook result left the whole kitchen H5 for the feed
+                # (0029 modal still up -> 0030 page=feed), so the
+                # modal-only predicate below starved on the very landing
+                # it produced. The next cook re-enters through the feed
+                # row exactly like the task entry, and a row already
+                # claimable or done ends the loop - nothing left to cook.
+                obs, _, button = s.row("小鸡厨房", reset=True)
+                if re.search("领取|已完成", button.text):
+                    break
+                s.tap_element(obs, button, lambda o:o.page == "kitchen",
+                              name="kitchen-reopen")
             # Device evidence (2026-09-26, run 780c45): the device never
             # renders the spec's 美食图鉴 gallery - the tap cooks directly
             # and answers with a result modal (金枪鱼海苔卷制作成功 +
@@ -447,8 +478,10 @@ class Manor:
             # The modal must actually go before the next tap: its frame
             # can classify kitchen with no 美食图鉴 text, which the old
             # predicate accepted without pressing back - leaving the
-            # modal up to swallow the following tap.
-            s.back(lambda o:o.page == "kitchen"
+            # modal up to swallow the following tap. The landing is
+            # kitchen (modal closed in place) or the feed (the H5 exited
+            # whole - device 2026-09-28); either ends the dismissal.
+            s.back(lambda o:o.page in ("kitchen", "feed")
                    and not o.has("美食图鉴|制作成功|厨余生成|查看图鉴"))
         if shop_refused:
             # The bag-full refusal (above) deferred the free 10g claim
@@ -466,5 +499,9 @@ class Manor:
                           lambda o:not o.has("快放不下|确认领取"),
                           spend=True, name="pantry-confirm")
             s.back(("kitchen",))
-        s.back(("feed",))
+        if s.obs.page != "feed":
+            # Device evidence (2026-09-28, run b2acc0): the cook dismissal
+            # can already leave the H5 on the feed - pressing Back again on
+            # a satisfied target would exit the whole app instead.
+            s.back(("feed",))
         s.complete_row("小鸡厨房")
