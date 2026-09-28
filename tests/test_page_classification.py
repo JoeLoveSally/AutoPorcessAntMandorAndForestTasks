@@ -467,3 +467,21 @@ def test_forest_task_row_browsing_the_member_center_is_not_member():
     ))
 
     assert obs.page != "member"
+
+
+def test_lottery_panel_after_the_sign_card_leaves_still_classifies():
+    # Device evidence (2026-09-28, run 84c8a6): the sign tap removes the
+    # 每日签到 card AND its 去逛逛 button from the panel in one refresh
+    # (frames 0074-0078 vs 0079+), leaving only the market row title and
+    # the flipped chance badge - none of the original group-2 anchors - so
+    # the frame fell to UNKNOWN and starved lottery-sign's postcondition
+    # on a sign that DID succeed. A 5774-frame replay shows the two added
+    # anchors lift exactly the 25 such UNKNOWN frames and steal nothing.
+    panel = classify(observation(
+        "规则", "仲夏花语装扮", "还有1次机会22天后清零", "立即抽奖",
+        "找能量>", "明细>", "去森林市集逛一逛(0/2)",
+        "浏览市集15S，可得1次机会", "去寻宝公益林浇水",
+        "单次浇水≥15g可得1次抽奖次数",
+    ))
+
+    assert panel.page == "lottery"

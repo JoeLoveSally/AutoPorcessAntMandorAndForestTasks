@@ -88,9 +88,17 @@ PAGE_RULES = (
     # backing out of it (feed -> farm spiral) until the unknown-page guard
     # refused the blind Back. Keep the original markers and add the ones
     # the completed panel still carries.
+    # Device evidence (2026-09-28, run 84c8a6): the sign tap removes the
+    # 每日签到 card AND its 去逛逛 button from the panel in one refresh
+    # (frames 0074-0078 vs 0079+), leaving the market row title and the
+    # flipped chance badge as the only surviving panel markers - none of
+    # the original group-2 anchors - so the post-sign frames classified
+    # UNKNOWN and starved lottery-sign's postcondition on a sign that HAD
+    # succeeded. Both additions exist on both sides of the tap
+    # (去森林市集逛一逛(0/2); 还有0次机会 -> 还有1次机会22天后清零).
     ("lottery", ("[立三主]即抽奖",
-                 ("每日签到|抽奖机会|去逛逛|杂货铺|消耗饲料换机会|"
-                  "还剩\\d+次机会|装扮抽抽乐|做任务得机会"))),
+                 ("每日签到|抽奖机会|去逛逛|森林市集|杂货铺|消耗饲料换机会|"
+                  "还剩\\d+次机会|还有\\d+次机会|装扮抽抽乐|做任务得机会"))),
     # The forest home carries a floating "森林寻宝" entrance badge that OCR
     # sometimes reads in full, so the badge text alone is not child evidence;
     # the child page itself exposes the lottery entry the workflow taps next.

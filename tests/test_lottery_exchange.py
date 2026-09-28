@@ -159,3 +159,151 @@ def test_retry_reconciles_when_the_row_reports_the_done_counter(monkeypatch):
 
     assert session.ex.store.verified == [(55, "VERIFIED", "done-row")]
     assert "^[立三主]即抽奖$" in session.taps
+
+
+def test_retry_reconciles_the_stale_sign_with_the_consumed_card(monkeypatch):
+    # Device evidence (2026-09-28, runs 84c8a6 -> fc7b38): 84c8a6's sign
+    # tap took effect (the card left the panel in one refresh) but its
+    # postcondition starved on the UNKNOWN-classified frames and left
+    # lottery-sign RESULT_UNKNOWN, so fc7b38's intent guard refused the
+    # next spend while the sign itself was already done. The consumed card
+    # on a lottery frame IS the evidence the sign awaited - verify there.
+    monkeypatch.setattr(shared_workflow, "dismiss",
+                        lambda session: session.final)
+    session = FakeLottery()
+    session.ex.store = FakeStore([(9, "lottery-sign", None)])
+    gone = obs("lottery", ["装扮抽抽乐", "还剩6次机会", "立即抽奖"], "sign-gone")
+    session._ensures = [gone, session.final]
+
+    lottery(session, 0)
+
+    assert session.ex.store.verified == [(9, "VERIFIED", "sign-gone")]
+    assert "^[立三主]即抽奖$" in session.taps
+
+
+def test_retry_cancels_the_stale_sign_and_resigns_while_the_card_offers_it(
+        monkeypatch):
+    # The opposite fate: the card still offering the sign proves the stuck
+    # tap never took effect, so it is cancelled - the flow then re-fires
+    # the sign itself instead of staying locked behind the stale
+    # submission for the rest of the day.
+    monkeypatch.setattr(shared_workflow, "dismiss",
+                        lambda session: session.final)
+    session = FakeLottery()
+    session.ex.store = FakeStore([(9, "lottery-sign", None)])
+    card = obs("lottery", ["每日签到", "签到", "每天访问，得1次抽奖机会",
+                           "装扮抽抽乐", "还剩4次机会", "立即抽奖"], "sign-card")
+    anchor = Element("每日签到", (335, 2419, 900, 2482), "sign-card")
+    button = Element("签到", (1150, 2485, 1350, 2555), "sign-card")
+    session._ensures = [card, session.final]
+    session.row = lambda *args, **kwargs: (card, anchor, button)
+    signed = obs("lottery", ["装扮抽抽乐", "还剩5次机会", "立即抽奖"], "signed")
+
+    def tap_element(_obs, element, predicate, **kwargs):
+        session.tap_element_calls.append((element.text, kwargs.get("name")))
+        assert predicate(signed)
+
+    session.tap_element = tap_element
+
+    lottery(session, 0)
+
+    assert session.ex.store.verified == [(9, "CANCELLED", "sign-card")]
+    assert session.tap_element_calls == [("签到", "lottery-sign")]
+    assert "^[立三主]即抽奖$" in session.taps
+
+
+def panel_of(oid, *items):
+    return Observation(oid, 0.0, 1440, 3200, "alipay",
+                       [Element(text, bounds, oid) for text, bounds in items],
+                       page="lottery")
+
+
+def test_ad_claim_accepts_the_pill_consumed_toastless_panel(monkeypatch):
+    # Device evidence (2026-09-28, run 1a0a44): the claim landed - frames
+    # 0019 -> 0020 flip 还有1次机会 to 还有2次机会 and consume the 领取 pill -
+    # but the panel draws no 领取成功 toast and the (1/2) title only counts
+    # browses, so both original alternatives starved on a completed claim
+    # and left RESULT_UNKNOWN. The pill vanishing from its paired
+    # title_y+35 slot is the completion evidence.
+    monkeypatch.setattr(shared_workflow, "dismiss",
+                        lambda session: session.final)
+    session = FakeLottery()
+    claim_row = panel_of("claim-row",
+                         ("去森林市集逛一逛(1/2)", (339, 2419, 930, 2482)),
+                         ("领取", (1171, 2461, 1266, 2509)),
+                         ("还有1次机会", (100, 400, 900, 460)),
+                         ("立即抽奖", (100, 520, 900, 580)))
+    title = Element("去森林市集逛一逛(1/2)", (339, 2419, 930, 2482), "claim-row")
+    pill = Element("领取", (1171, 2461, 1266, 2509), "claim-row")
+    session.row = lambda *args, **kwargs: (claim_row, title, pill)
+    captured = {}
+
+    def tap_element(_obs, element, predicate, **kwargs):
+        session.tap_element_calls.append((element.text, kwargs.get("name")))
+        captured[kwargs.get("name")] = predicate
+
+    session.tap_element = tap_element
+
+    lottery(session, 1)
+
+    predicate = captured["lottery-ad-claim"]
+    # Toastless success: title unchanged, pill gone, count bumped; a
+    # different row's 领取 ~300px below must not read as ours still open.
+    assert predicate(panel_of(
+        "consumed",
+        ("去森林市集逛一逛(1/2)", (339, 2419, 930, 2482)),
+        ("还有2次机会", (100, 400, 900, 460)),
+        ("立即抽奖", (100, 520, 900, 580)),
+        ("领取", (1171, 2731, 1266, 2779))))
+    # Our pill still standing at the paired slot: the claim did not fire.
+    assert not predicate(panel_of(
+        "offered",
+        ("去森林市集逛一逛(1/2)", (339, 2419, 930, 2482)),
+        ("领取", (1171, 2461, 1266, 2509)),
+        ("还有1次机会", (100, 400, 900, 460))))
+    assert not predicate(Observation("unknown", 0.0, 1440, 3200, "alipay",
+                                     [], page="UNKNOWN"))
+    assert "^[立三主]即抽奖$" in session.taps
+
+
+def test_retry_reconciles_the_stale_ad_claim_with_the_consumed_pill(monkeypatch):
+    monkeypatch.setattr(shared_workflow, "dismiss",
+                        lambda session: session.final)
+    # Device evidence (2026-09-28, runs 1a0a44 -> next): fc7b38 left
+    # lottery-ad-claim RESULT_UNKNOWN behind a claim that had landed
+    # (pill gone, count +1), so the intent guard would refuse every later
+    # spend that day. The pill already consumed on the entry panel IS the
+    # evidence the claim awaited - verify it there.
+    session = FakeLottery()
+    session.ex.store = FakeStore([(11, "lottery-ad-claim", None)])
+    gone = panel_of("pill-gone",
+                    ("去森林市集逛一逛(1/2)", (339, 2419, 930, 2482)),
+                    ("还有2次机会", (100, 400, 900, 460)),
+                    ("立即抽奖", (100, 520, 900, 580)))
+    session._ensures = [gone, session.final]
+
+    lottery(session, 0)
+
+    assert session.ex.store.verified == [(11, "VERIFIED", "pill-gone")]
+    assert "^[立三主]即抽奖$" in session.taps
+
+
+def test_retry_cancels_the_stale_ad_claim_while_the_pill_still_offers(monkeypatch):
+    monkeypatch.setattr(shared_workflow, "dismiss",
+                        lambda session: session.final)
+    # The opposite fate: the pill still standing at the row's paired
+    # title_y+35 slot proves the stuck claim never took, so it is
+    # cancelled and the ads loop is free to fire the claim again.
+    session = FakeLottery()
+    session.ex.store = FakeStore([(11, "lottery-ad-claim", None)])
+    standing = panel_of("still-offered",
+                        ("去森林市集逛一逛(1/2)", (339, 2419, 930, 2482)),
+                        ("领取", (1171, 2461, 1266, 2509)),
+                        ("还有1次机会", (100, 400, 900, 460)),
+                        ("立即抽奖", (100, 520, 900, 580)))
+    session._ensures = [standing, session.final]
+
+    lottery(session, 0)
+
+    assert session.ex.store.verified == [(11, "CANCELLED", "still-offered")]
+    assert "^[立三主]即抽奖$" in session.taps

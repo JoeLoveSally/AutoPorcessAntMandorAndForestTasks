@@ -35,6 +35,33 @@ def lottery(s, ads, exchange=False):
         # card's absence as much as an explicit 已签到. An absent card on
         # arrival means an earlier partial run already signed this side.
         obs = s.ensure("lottery")
+        # Device evidence (2026-09-28, runs 84c8a6 -> fc7b38 -> 1a0a44):
+        # 84c8a6's sign tap DID take effect - the card left the panel in
+        # one refresh - but its postcondition starved on the frames that
+        # then read UNKNOWN and left lottery-sign RESULT_UNKNOWN, so
+        # fc7b38's intent guard refused the next spend; fc7b38 in turn
+        # left lottery-ad-claim RESULT_UNKNOWN behind a claim that had
+        # also landed (1a0a44: 还有1次 -> 2次机会, pill consumed). The
+        # panel states each submission's own fate: the sign card consumed
+        # proves it fired, still offering proves it did not (cancel, then
+        # re-sign below); the market row's claim pill sits at its title
+        # center + 35 (1a0a44 0018: 2450 -> 2485) so a pill still there
+        # proves the claim never took. Any other stuck action keeps
+        # blocking until done() can reconcile it.
+        if s.ex.store.unresolved(s.task):
+            consumed = not obs.has(title)
+            market = obs.find("去杂货铺逛一逛|去森林市集逛一逛")
+            offered = any(e.text == "领取"
+                          and any(15 <= e.point[1] - t.point[1] <= 55
+                                  for t in market)
+                          for e in obs.elements)
+            for action_id, name, _ in s.ex.store.unresolved(s.task):
+                if name == "lottery-sign":
+                    s.ex.store.action(action_id, "VERIFIED" if consumed else "CANCELLED",
+                                      obs.id)
+                elif name == "lottery-ad-claim":
+                    s.ex.store.action(action_id, "VERIFIED" if not offered else "CANCELLED",
+                                      obs.id)
         if not obs.has(title):
             continue
         obs, _, button = s.row(title, page="lottery")
@@ -77,8 +104,21 @@ def lottery(s, ads, exchange=False):
         if button.text != "领取":
             raise AutomationError("Lottery advertisement reward not available")
         previous = title.text
-        s.tap_element(obs, button, lambda o, previous=previous:o.page == "lottery" and (
+        pill = button
+        # Device evidence (2026-09-28, run 1a0a44): the claim DID land -
+        # frames 0019 -> 0020 flip 还有1次机会 to 还有2次机会 and consume the
+        # 领取 pill - but this period's panel draws no 领取成功 toast (six
+        # captures, none) and the (N/2) title only counts browses, so both
+        # original alternatives starved on a completed claim; the
+        # historical VERIFIEDs (bd69ed, 59771b) rode the toast this era no
+        # longer renders. The pill disappearing from its paired
+        # title_y+35 slot is the affordance-consumed proof the kitchen
+        # claims already use, and only within +-20px so another row's
+        # 领取 (~300px away, device 1a0a44 0018) cannot stand in for it.
+        s.tap_element(obs, button, lambda o, previous=previous, pill=pill:o.page == "lottery" and (
             o.has("领取成功") or not o.has(re.escape(previous))
+            or not any(e.text == pill.text and abs(e.point[1] - pill.point[1]) < 20
+                       for e in o.elements)
         ),
                       name="lottery-ad-claim", spend=True, detail={"ad":index+1})
     if exchange:
