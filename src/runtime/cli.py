@@ -39,6 +39,7 @@ def main():
     logger = Logger(root, run)
     store = None
     manager = None
+    device = None
     try:
         selected_config = config_path(root, args.config)
         config = tomllib.loads(selected_config.read_text())
@@ -83,6 +84,10 @@ def main():
         print(f"FAILED: {exc}\nLog: {logger.path}", file=sys.stderr)
         return 1
     finally:
+        if device is not None and device.metrics:
+            # Per-command ADB timings: the split that shows where each
+            # ~3.4s observation goes (dumpsys vs screencap vs input).
+            logger.emit("device.metrics", calls=device.metrics_summary())
         if store:
             store.close()
 

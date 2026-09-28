@@ -143,8 +143,11 @@ class Session:
         # Device cadence (2026-09-23): a fresh capture costs ~3-4s of
         # screenshot+OCR. Swipes validate without an element box, so a
         # caller's previous frame can serve as the before-frame while it is
-        # inside the 12s freshness window.
-        obs = obs or self.observe("before-scroll")
+        # inside the 12s freshness window. An expired frame is recaptured
+        # here because validate() would only reject it mid-swipe; the 10s
+        # margin leaves room for validate()'s own foreground() round-trip.
+        if obs is None or time.monotonic() - obs.captured > 10:
+            obs = self.observe("before-scroll")
         self.obs = self.ex.swipe(obs, region, target, allow_unknown=allow_unknown)
         return self.obs
 
@@ -285,7 +288,7 @@ class Session:
             no_progress = 0
             for _ in range(self.config.get("max_reset_scrolls", 8)):
                 before = obs
-                obs = self.scroll((.5,.4,.5,.82))
+                obs = self.scroll((.5,.4,.5,.82), obs=obs)
                 if obs.has("^签到$|庄园小课堂|每日捐蛋"):
                     break
                 no_progress = no_progress + 1 if self.same_view(before, obs) else 0
@@ -313,7 +316,7 @@ class Session:
                 # fold means the pill is off-screen: lift the list once
                 # and pair again on the raised frame.
                 if anchor.point[1] > obs.height * .93:
-                    obs = self.scroll()
+                    obs = self.scroll(obs=obs)
                     titles = obs.find(title)
                     if len(titles) > 1:
                         raise AutomationError(f"Ambiguous task identity {title}", "AMBIGUOUS")
@@ -374,7 +377,7 @@ class Session:
                     return obs, None, None
                 raise AutomationError(f"Required task missing: {title}")
             before = obs
-            obs = self.scroll()
+            obs = self.scroll(obs=obs)
             no_progress = no_progress + 1 if self.same_view(before, obs) else 0
             if no_progress >= 2:
                 if not required:

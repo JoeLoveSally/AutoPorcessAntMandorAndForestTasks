@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import re
+import struct
 import subprocess
 import time
+
+import cv2
+import numpy as np
 
 from domain_data import AutomationError
 
@@ -42,6 +46,43 @@ class Device:
         output = self.shell("dumpsys", "activity", "activities")
         match = re.search(r"(?:topResumedActivity=|mResumedActivity:).*?\s([\w.]+)/", output)
         return match[1] if match else ""
+
+    def frame(self):
+        """Screen pixels as a BGR array.
+
+        Device cadence (2026-09-28): exec-out screencap -p spends ~2.1s
+        per capture, of which ~0.5s is the device-side PNG encode. The raw
+        stream (16-byte width/height/format/bpp header + RGBA payload,
+        measured 1440x3200) skips the encode at 1.6s and decodes to the
+        same pixels - against the PNG path it differed by mean 0.47,
+        below the 0.57 drift of two raw captures of the moving page. An
+        unexpected header or format falls back to the PNG path.
+        """
+        data = self.run("exec-out", "screencap")
+        if len(data) >= 16:
+            width, height, fmt, _bpp = struct.unpack("<4i", data[:16])
+            if (fmt == 1 and width > 0 and height > 0
+                    and len(data) == 16 + width * height * 4):
+                rgba = np.frombuffer(data, np.uint8, offset=16).reshape(height, width, 4)
+                return cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGR)
+        image = cv2.imdecode(np.frombuffer(self.screenshot(), np.uint8), cv2.IMREAD_COLOR)
+        if image is None:
+            raise AutomationError("Cannot decode screenshot", "DEVICE")
+        return image
+
+    def metrics_summary(self):
+        """Aggregate per-command ADB timings collected by run()."""
+        totals = {}
+        for args, seconds in self.metrics:
+            parts = list(args[:2])
+            if len(parts) > 1:
+                parts[1] = parts[1].split(" ")[0]
+            entry = totals.setdefault(" ".join(parts),
+                                      {"count": 0, "total": 0.0, "max": 0.0})
+            entry["count"] += 1
+            entry["total"] = round(entry["total"] + seconds, 2)
+            entry["max"] = round(max(entry["max"], seconds), 2)
+        return totals
 
     def screenshot(self):
         data = self.run("exec-out", "screencap", "-p")

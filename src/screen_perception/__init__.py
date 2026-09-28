@@ -328,7 +328,10 @@ def parse_tree(xml, observation):
 class Observer:
     def __init__(self, device, directory, logger):
         from rapidocr_onnxruntime import RapidOCR
-        self.ocr = RapidOCR(intra_op_num_threads=2, inter_op_num_threads=2)
+        # Offline replay (2026-09-28): 4 intra-op threads cut RapidOCR from
+        # 1.35s to 1.14s per frame with byte-identical results on 40
+        # archived frames (2-thread vs 4-thread, scores included).
+        self.ocr = RapidOCR(intra_op_num_threads=4, inter_op_num_threads=4)
         self.device, self.directory, self.logger = device, directory, logger
         directory.mkdir(parents=True, exist_ok=True)
         self.sequence = 0
@@ -345,10 +348,7 @@ class Observer:
             except AutomationError as exc:
                 self.logger.emit("tree.unavailable", error=str(exc))
         captured = time.monotonic()
-        png = self.device.screenshot()
-        image = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
-        if image is None:
-            raise AutomationError("Cannot decode screenshot", "DEVICE")
+        image = self.device.frame()
         h, w = image.shape[:2]
         scale = min(1.0, 1080 / w)
         small = cv2.resize(image, (round(w * scale), round(h * scale)))
@@ -374,7 +374,12 @@ class Observer:
         obs = classify(Observation(oid, captured, w, h, package, elements, image=image))
         if obs.page == "manor" and (diary := manor_diary_entry(obs)):
             obs.elements.append(diary)
-        (self.directory / (oid + ".png")).write_bytes(png)
+        # The evidence archive stays PNG (lossless, same pixels) but is
+        # encoded locally now that the capture arrives raw.
+        ok, encoded = cv2.imencode(".png", image)
+        if not ok:
+            raise AutomationError("Cannot encode screenshot", "DEVICE")
+        (self.directory / (oid + ".png")).write_bytes(encoded.tobytes())
         payload = {"id": oid, "reason": reason, "page": obs.page, "overlays": obs.overlays,
                    "captured": captured, "package": package, "width": w, "height": h,
                    "elements": [asdict(e) for e in obs.elements]}

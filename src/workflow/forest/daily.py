@@ -478,7 +478,7 @@ class Forest:
         for _ in range(5):
             if obs.has(pattern, PLAZA_ENTRY):
                 break
-            obs = s.scroll(PLAZA_SCROLL)
+            obs = s.scroll(PLAZA_SCROLL, obs=obs)
         s.tap(pattern, lambda o: o.page == target, region=PLAZA_ENTRY)
         obs = s.observe("water-progress")
         if self._water_completed(obs, love, amount):
@@ -491,8 +491,15 @@ class Forest:
             raise AutomationError("Watering progress requires current daily evidence", "RESULT_UNKNOWN")
         s.tap("为爱攒能量" if love else "^浇水$",
               lambda o:o.has("克|g") and o.has("攒能量" if love else "浇水"))
+        # Device cadence (2026-09-28): a fresh capture costs ~3-4s of
+        # screenshot+OCR. The old loop captured before every reading AND
+        # tap() captured again before every +10 - two redundant frames per
+        # increment. The frame the tap confirms already carries the new
+        # reading, so it feeds the next iteration, and tap_element() needs
+        # no before-frame of its own (its pixel guard still proves the +
+        # control is stable).
+        obs = s.observe("water-quantity")
         for _ in range(9):
-            obs = s.observe("water-quantity")
             quantities = obs.find(r"^\d+\s*(?:g|克)?$", WATER_DIALOG)
             if len(quantities) != 1:
                 raise AutomationError("Water quantity is ambiguous", "QUANTITY")
@@ -501,7 +508,22 @@ class Forest:
                 break
             if not love or value > amount or (amount-value) % 10:
                 raise AutomationError(f"Unexpected water quantity {value}", "QUANTITY")
-            s.tap(r"^\+$", lambda o,v=value:o.has(rf"^{v+10}\s*(?:g|克)?$", WATER_DIALOG))
+            plus = obs.find(r"^\+$")
+            for _ in range(2):
+                if plus:
+                    break
+                page = obs.page
+                obs = s.observe("water-quantity-refresh")
+                if obs.page != page or obs.overlays:
+                    break
+                plus = obs.find(r"^\+$")
+            if len(plus) != 1:
+                raise AutomationError(
+                    f"Expected unique target ^+$: found {len(plus)}", "AMBIGUOUS")
+            obs = s.tap_element(
+                obs, plus[0],
+                lambda o,v=value: o.has(rf"^{v+10}\s*(?:g|克)?$", WATER_DIALOG),
+                name="water-quantity-plus")
         else:
             raise AutomationError("Unable to set water quantity")
         base = max(self._g_values(obs), default=0)
@@ -585,7 +607,7 @@ class Forest:
         for _ in range(5):
             if obs.has(RAIN_ENTRY):
                 break
-            obs = s.scroll(PLAZA_SCROLL)
+            obs = s.scroll(PLAZA_SCROLL, obs=obs)
         s.tap(RAIN_ENTRY, lambda o:o.page == "rain")
         if s.ex.store.unresolved(s.task):
             raise AutomationError("Interrupted energy rain needs round evidence", "RESULT_UNKNOWN")

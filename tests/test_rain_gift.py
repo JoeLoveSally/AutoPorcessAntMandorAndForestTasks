@@ -62,7 +62,7 @@ class RainSession:
     def ensure(self, _target):
         return frame("home", "forest", [("能量雨", (180, 1400, 300, 1460))])
 
-    def scroll(self, _region):
+    def scroll(self, _region, **_kwargs):
         raise AssertionError("the rain entry is already on the plaza frame")
 
     def tap(self, pattern, predicate, **_kwargs):

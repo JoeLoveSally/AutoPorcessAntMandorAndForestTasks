@@ -187,7 +187,7 @@ def test_cooperate_entry_drags_the_plaza_card_row_not_the_icon_row():
         def ensure(self, _page):
             return observation("home", ["森林广场", "能量雨", "真爱合种"], "forest")
 
-        def scroll(self, path):
+        def scroll(self, path, **_kwargs):
             self.scrolls.append(path)
             # The drag reveals the 合种 card: its label lands in the real
             # PLAZA_ENTRY band, its art badge sits above it.

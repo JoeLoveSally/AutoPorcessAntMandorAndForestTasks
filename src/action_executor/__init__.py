@@ -33,8 +33,8 @@ class Executor:
             if not 0 <= x < obs.width or not 0 <= y < obs.height:
                 raise AutomationError("Target outside display", "BOUNDS")
             if pixel_guard:
-                current = cv2.imdecode(np.frombuffer(self.device.screenshot(), np.uint8), cv2.IMREAD_COLOR)
-                if current is None or current.shape != obs.image.shape:
+                current = self.device.frame()
+                if current.shape != obs.image.shape:
                     raise AutomationError("Display geometry changed", "STALE")
                 x1, y1, x2, y2 = element.bounds
                 a, b = obs.image[max(0,y1):y2, max(0,x1):x2], current[max(0,y1):y2, max(0,x1):x2]

@@ -15,7 +15,6 @@ the retries skip it.
 import time
 from types import SimpleNamespace
 
-import cv2
 import numpy as np
 import pytest
 
@@ -95,9 +94,9 @@ def test_element_tap_reacquires_a_stale_target_without_the_pixel_guard():
     assert executor.tap_kwargs[1]["pixel_guard"] is False
 
 
-def _guard_executor(png_bytes):
+def _guard_executor(image):
     device = SimpleNamespace(foreground=lambda: "alipay",
-                             screenshot=lambda: png_bytes)
+                             frame=lambda: image)
     return Executor(device, None, None, None, "alipay",
                     SimpleNamespace(check=lambda: None))
 
@@ -106,7 +105,6 @@ def test_pixel_guard_flags_changed_pixels_and_can_be_skipped_after_refind():
     observed = np.zeros((64, 64, 3), np.uint8)
     observed[10:20, 10:50] = 200   # the CTA box as it was observed
     current = np.zeros((64, 64, 3), np.uint8)   # animated: box differs by 200
-    png = cv2.imencode(".png", current)[1].tobytes()
     obs = Observation(
         "obs1", time.monotonic(), 64, 64, "alipay",
         [Element("做任务继续抽", (10, 10, 50, 20), "obs1")],
@@ -114,8 +112,8 @@ def test_pixel_guard_flags_changed_pixels_and_can_be_skipped_after_refind():
     )
 
     with pytest.raises(AutomationError, match="Target changed since observation"):
-        _guard_executor(png).validate(obs, obs.elements[0])
+        _guard_executor(current).validate(obs, obs.elements[0])
 
     # The session retries call validate with pixel_guard=False right after
     # their fresh OCR re-find, so an animated CTA survives here.
-    _guard_executor(png).validate(obs, obs.elements[0], pixel_guard=False)
+    _guard_executor(current).validate(obs, obs.elements[0], pixel_guard=False)
