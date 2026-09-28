@@ -400,3 +400,70 @@ def test_farm_entry_welcome_card_is_never_flagged_from_vision_alone():
 
     assert obs.page == "farm"
     assert obs.overlays == []
+
+
+def test_farm_welcome_card_label_row_never_fires_the_reward_overlay():
+    # Device evidence (2026-09-27, run 80393d): the welcome card's own
+    # label row (明日肥料|获得奖励|每日签到) OCRs joined as
+    # 明日肥料获得奖励每日答到, which fired the reward family; the dismissal's
+    # Back fallback then left the farm one beat before its countdown-driven
+    # auto-jump (the drawer lands with the card still on screen, run
+    # 9d8f76) and the jump wait starved on page=feed. The card is
+    # self-managing state: its frames must stay overlay-free.
+    obs = screen_observation(
+        "farm-welcome",
+        ["支付宝·芭芭农场", "欢迎来到芭芭农场", "明日肥料获得奖励每日签到",
+         "2100肥料待领取", "肥料+2100", "还差2次领肥"],
+        "farm_welcome.jpg",
+    )
+
+    assert obs.page == "farm"
+    assert "reward" not in obs.overlays
+
+
+def test_kitchen_result_modal_classifies_from_the_event_header():
+    # Device evidence (2026-09-27, run a520fb): the cook-result modal hides
+    # the store button and the claim row reads plain 领食材 (no 今日) while
+    # the new pity banner displaces 普通美食 - only the event header remains,
+    # page=UNKNOWN made back() refuse with "Cannot act on unknown page" and
+    # the finished cook could not close. Group two keeps the rule tied to
+    # kitchen content (做美食 button + 食材 texts both show through).
+    obs = classify(observation(
+        "秋食风味录", "5次内必解锁一道新的美食哦", "食材",
+        "橄榄烤彩椒制作成功", "喂食小鸡立产0.15颗爱心蛋", "新解锁+1",
+        "查看图鉴", "厨余生成了58肥料", "领食材", "做美食",
+    ))
+
+    assert obs.page == "kitchen"
+
+
+def test_member_home_classifies_and_the_feed_row_stays_feed():
+    # Device evidence (2026-09-27, run e7673b): the 支付宝会员 home under
+    # its widget-promo layer classified UNKNOWN and browse()'s landing wait
+    # starved. The feed row copy (去支付宝会员签到 + 签到得积分换好礼) carries
+    # both 会员 and 积分, so group one must be promo/structure text the row
+    # never has - a misfire there would flip every feed frame.
+    member = classify(observation(
+        "1356", "领积分兑好礼更方便", "添加会员小组件到桌面",
+        "尊敬的铂金会员", "待领积分", "188", "点击添加",
+    ))
+    feed_row = classify(observation(
+        "蚂蚁庄园", "饲料任务", "去支付宝会员签到",
+        "和小鸡一起签到得积分换好礼，还可获赠", "去完成",
+    ))
+
+    assert member.page == "member"
+    assert feed_row.page == "feed"
+
+
+def test_forest_task_row_browsing_the_member_center_is_not_member():
+    # Device evidence (2026-09-24, run 699443): the forest task list's
+    # 逛支付宝会员中心 browse row contains 会员中心 as a substring, which
+    # satisfied member group one on 10 frames in a replay - the frame must
+    # keep its pre-existing non-member outcome.
+    obs = classify(observation(
+        "蚂蚁森林", "能量", "我的活力值", "森林寻宝",
+        "逛支付宝会员中心", "逛一逛", "逛高德地图领红包", "抽/次",
+    ))
+
+    assert obs.page != "member"

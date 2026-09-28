@@ -241,7 +241,14 @@ class Manor:
         # page"). Back is non-destructive navigation and the ("feed",)
         # target guards the landing, so allow unknown unconditionally -
         # same policy as the TIMER_MISSING retry above.
-        s.back(("feed",), allow_unknown=True)
+        # Device evidence (2026-09-27, run e7673b): the member center sits
+        # on the 支付宝会员 home, so its back lands "member" (new rule) - the
+        # old ("feed",) only waited and starved on page=UNKNOWN. Accept the
+        # known intermediate and replan through the canonical router; the
+        # direct ad -> feed stacks (run 0a42ca) still return on this Back.
+        s.back(("feed", "member"), allow_unknown=True)
+        if s.obs.page != "feed":
+            s.ensure("feed")
         s.complete_row(title, claim=claim)
 
     def lottery(self, title):

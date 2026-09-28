@@ -70,7 +70,14 @@ PAGE_RULES = (
     # 献爱心 group comes ahead of it now, and the kitchen main page itself
     # never carries 献爱心.
     ("ingredient_shop", ("献爱心", "食材")),
-    ("kitchen", ("小鸡厨房|爱心食材店|领今日食材", "做美食|食材")),
+    # Device evidence (2026-09-27, run a520fb): the cook-result modal keeps
+    # only the event header - the new pity banner (5次内必解锁一道新的美食哦)
+    # displaces 普通美食, the claim row OCRs as 领今日-free 领食材 and the
+    # store button is covered - so the frame classified UNKNOWN and back()
+    # refused with "Cannot act on unknown page" while the modal was up.
+    # A scan of 09-24..09-27 frames shows 秋食风味录 only ever on kitchen
+    # and kitchen-modal frames (76 kitchen + 36 modal, zero other pages).
+    ("kitchen", ("小鸡厨房|爱心食材店|领今日食材|秋食风味录", "做美食|食材")),
     ("farm_tasks", ("做任务集肥料",)),
     ("farm", ("芭芭农场", "施肥|肥料")),
     # Device evidence (2026-09-24, run 9828af): once the sign card was
@@ -105,6 +112,17 @@ PAGE_RULES = (
     ("cooperate", ("小树苗|合种", "浇水", "证书|今日排行|说点啥")),
     ("manor_friend", ("的蚂蚁庄园", "蹭吃|雇佣|带小鸡")),
     ("manor", ("蚂蚁庄园", "领饲料", "家庭")),
+    # Device evidence (2026-09-27, run e7673b): backing out of the member
+    # task center lands the 支付宝会员 home under a widget-promo layer
+    # (领积分兑好礼更方便 / 添加会员小组件到桌面 / 待领积分) that classified
+    # UNKNOWN, so browse()'s landing wait starved on page=UNKNOWN. Group
+    # one is promo/structure text the feed row never carries - the row's
+    # 去支付宝会员签到 must not flip a feed frame - and group two keeps the
+    # rule on the member home even when the promo headline rotates. Bare
+    # 会员中心 is banned as an anchor: run 699443's forest task list row
+    # 逛支付宝会员中心 contains it as a substring (10 false-positive frames
+    # in a HEAD-vs-worktree replay of 09-24..27 evidence).
+    ("member", ("待领积分|领积分兑好礼|添加会员小组件", "会员|积分")),
     ("ad", ("可领饲料|可领奖励|浏览完成|任务.*浏览|浏览.*秒|滑动.*浏览|看15s视频",)),
 )
 
@@ -139,6 +157,16 @@ def classify(observation):
                                        "|饲料袋快满|只能装下")),
                           ("reward", "获得奖励|恭喜获得七日礼包|家庭家具上新啦|开心收下|我知道啦|去蚂蚁森林收能量|施肥挑战"),
                           ("confirm", "确认喂食|选择美食|兑换确认")):
+        if name == "reward" and observation.has(r"欢迎来到芭芭农场"):
+            # Device evidence (2026-09-27, run 80393d): the farm entry
+            # welcome card's own label row (明日肥料|获得奖励|每日签到) OCRs
+            # joined as 明日肥料获得奖励每日答到 and fired the reward overlay;
+            # the reward dismissal's Back fallback left the farm one beat
+            # before the countdown-driven auto-jump (09-25, run 9d8f76 shows
+            # the drawer landing while the card is still on screen) and the
+            # jump wait then starved on page=feed. The card is self-managing
+            # state, never a dismissible reward.
+            continue
         if observation.has(pattern):
             observation.overlays.append(name)
     # Homepage ads may obscure the content while leaving the bottom navigation

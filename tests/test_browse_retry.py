@@ -32,6 +32,7 @@ class FakeSession:
         self._open = obs("ad", ["看15s视频"])
         self.tap_element_calls = []
         self.back_calls = []
+        self.ensure_calls = []
         self.complete_row_calls = []
         self.done_args = []
 
@@ -48,6 +49,11 @@ class FakeSession:
     def back(self, pages, **kwargs):
         self.back_calls.append((pages, kwargs))
         self.obs = self._list
+        return self.obs
+
+    def ensure(self, target):
+        self.ensure_calls.append(target)
+        self.obs = obs("feed", ["饲料任务"])
         return self.obs
 
     def complete_row(self, pattern, page="feed", claim=False):
@@ -84,7 +90,8 @@ def test_successful_browse_backs_to_feed_despite_the_completion_race(
     # to the unruled 任务已完成 summary before s.back()'s own observation -
     # so an allow_unknown flag computed from s.obs.page would say False and
     # validate() would refuse the fresh UNKNOWN observation. Back must
-    # allow unknown unconditionally; the ("feed",) target guards landing.
+    # allow unknown unconditionally; the ("feed", "member") target guards
+    # landing and a direct feed landing skips the replan entirely.
     def succeed(session, _swipe):
         session.obs = obs("ad", ["浏览完成"])
         return session.obs
@@ -94,5 +101,27 @@ def test_successful_browse_backs_to_feed_despite_the_completion_race(
 
     Manor(session).browse("看庄园小视频")
 
-    assert session.back_calls == [(("feed",), {"allow_unknown": True})]
+    assert session.back_calls == [(("feed", "member"), {"allow_unknown": True})]
+    assert session.ensure_calls == []
+    assert session.complete_row_calls == [("看庄园小视频", "feed", False)]
+
+
+def test_browse_landing_on_the_member_home_replans_to_the_feed(monkeypatch):
+    # Device evidence (2026-09-27, run e7673b): the member task center sits
+    # on the 支付宝会员 home, so the return Back lands "member" (new classify
+    # rule) instead of the feed and the old ("feed",) wait starved on
+    # page=UNKNOWN. The landing wait must accept that intermediate and the
+    # canonical router must walk the final hop (parents: member -> feed).
+    def succeed(session, _swipe):
+        session.obs = obs("ad", ["浏览完成"])
+        return session.obs
+
+    monkeypatch.setattr(shared_workflow, "browse", succeed)
+    session = FakeSession()
+    session._list = obs("member", ["待领积分", "尊敬的铂金会员", "点击添加"])
+
+    Manor(session).browse("看庄园小视频")
+
+    assert session.back_calls == [(("feed", "member"), {"allow_unknown": True})]
+    assert session.ensure_calls == ["feed"]
     assert session.complete_row_calls == [("看庄园小视频", "feed", False)]

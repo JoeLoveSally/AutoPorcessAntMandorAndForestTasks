@@ -217,7 +217,13 @@ class Session:
                    # out (proven by every completed ad run, which backs to
                    # the lottery), and the accepted-any-landing replan
                    # covers stacks opened from the manor feed instead.
-                   "ad": "lottery"}
+                   "ad": "lottery",
+                   # Device evidence (2026-09-27, run e7673b): the member
+                   # task center sits under the 支付宝会员 home, so an
+                   # interrupted browse leaves the entry on that home (now
+                   # classifiable, its promo layer included); Back walks it
+                   # out to the feed that opened it.
+                   "member": "feed"}
         for _ in range(8):
             if obs.page == target and not obs.overlays:
                 return obs
