@@ -1,5 +1,113 @@
 # 真机校准记录
 
+## 2026-09-28：四失败复跑收口与彩票悬挂对账
+
+- 全天终态：08:56-09:42 链 24 项初值 **15 SUCCESS + 5 SKIPPED + 4 FAILED**
+  （donate_egg/farm/kitchen/friends），复跑后终值 **16 SUCCESS +
+  3 ALREADY_DONE + 5 SKIPPED + 0 FAILED**。CLI JSON 的 SUCCESS 只表流程走完，
+  真值一律读 `runtime/task_state.db`（本轮 donate/farm/kitchen 复跑 CLI 报
+  SUCCESS、DB 实为 ALREADY_DONE 再次印证）。
+- 09-27 修复真机生效：member 落点路由（`manor.feed.member` SUCCESS）、rain
+  候选遍历（`forest.rain` SUCCESS）、diary 书服务端状态回归（SUCCESS）、
+  farm 欢迎卡 reward 守卫与 kitchen 模态分类——后两项把失败推进到流程更深处
+  才暴露出本轮新根因。
+- `manor.family.donate_egg` FAILED `d1da54`——**Back 出发帧瞬时 UNKNOWN**：
+  捐赠后回读详情页重渲染中途（0022 donate_detail → 0023 UNKNOWN），ensure
+  parents 的 Back 谓词拒绝按压。修复 = 该 Back `allow_unknown=True`（谓词仍
+  排除落点 UNKNOWN，非破坏导航与 UNKNOWN 分支同立场）。复跑 ALREADY_DONE
+  （入口对账放行），逻辑由 `test_ensure_navigation` 覆盖，待 09-29 链锻炼。
+- `manor.feed.farm` FAILED `77dae5`——两根因：① 抽屉轮播横幅每帧改写签名，
+  no_progress 永不到 2，滚动预算在循环头耗尽却硬抛（行真缺席与两条已确认
+  路径同判）→ `row()` 预算耗尽尊重 `required=False`；② 欢迎卡倒计时自动
+  签到（签到领肥 3s→1s），抽屉签到条渲染 已领取、**每日签到行整行缺席**（34
+  帧零出现），而原认领谓词 `has("已领取")` 被常驻已领取架空 → 领取顺序改为
+  肥料行先行 + 每日签到 `required=False` + 认领谓词改药丸消失（±20px 配对）。
+  复跑 ALREADY_DONE；`fertilizer-claim`/`fertilization` 在全部 284 个历史日志
+  零命中——抽屉领取+施肥序列从未走通，待 09-29 链验证。
+- `manor.feed.kitchen` FAILED `b2acc0`——**cook-back 整页落 feed**：一次 Back
+  从结果模态直接退出 H5 到 feed（0029 模态在屏 → 0030 page=feed），模态专用
+  谓词在它自己产生的落点上饿死。修复 = 后置谓词放宽 `kitchen|feed`、循环内
+  非 kitchen 时经 feed 行重进（`kitchen-reopen`，行已领取/已完成则收口）、
+  末尾 `page != "feed"` 才按 Back（防止在已满足目标上二次 Back 退出整个应用）。
+  复跑 ALREADY_DONE，单测覆盖，待 09-29 链锻炼。
+- `forest.friends` 三根因链，复跑 `1a0a44` FAILED → `cd89c9` **SUCCESS**：
+  - **签后分类缺口**（84c8a6）：签到一刷新移除 每日签到 卡与其按钮，面板仅剩
+    市集行标题与翻转的机会徽标——group2 旧锚全失，后置在已成功的签到上饿死。
+    修复 = 锚追加 `森林市集|还有\d+次机会`（tap 前后帧均携带）。
+  - **lottery-sign 悬挂**（84c8a6 → fc7b38）：签到实际生效但后置星帧读
+    RESULT_UNKNOWN，fc7b38 首个 spend（lottery-ad-claim）被 intent 守卫拒。
+    修复 = sign 循环入口对账：卡已消费 ⇒ VERIFIED、卡仍在供给 ⇒ CANCELLED
+    重签——与 kitchen 领食材、兑换确认同构的状态锚定对账。
+  - **lottery-ad-claim 后置饿死**（1a0a44）：claim 实际生效（0019→0020
+    还有1次→2次机会、领取药丸消失），但当期面板不再弹 领取成功 toast（六次
+    采样零命中）、标题 (N/2) 只计浏览数不随 claim 变——两个旧替代证据全空，
+    历史 VERIFIED（bd69ed/59771b）靠的正是已不渲染的 toast。修复 = 药丸从
+    配对 title_y+35 槽位消失（±20px，0018 帧 2450→2485 实测）作为完成证据 +
+    入口 ad-claim 对账（药丸仍在 ⇒ CANCELLED 重领）。
+  - `cd89c9` 全程取证：入口对账放行 → 广告浏览 + **lottery-ad-claim 首次真机
+    VERIFIED** → 右/左双侧面板 44 帧全部正确分类、签到与两侧抽奖、结果视图
+    关闭逐项 verified → DB SUCCESS、当日悬挂清零。
+- 复跑中 donate/farm/kitchen 走 ALREADY_DONE：入口 already 分支不点行
+  「领取」即收口——对照 spec L21「领饲料任务仅需完成任务，不需要领取完成任务
+  后的奖励」，属规格既定设计而非漏领。
+- 帧回放回归：`classify_scan.py` 双进程重建 5774 帧重分类，仅 25 帧变化、
+  全部 `UNKNOWN → lottery`、既有识别页零抢页，抽查均为真实抽奖面板。
+- 门禁：ruff clean，**184 passed**（+11：row 预算 ×2、农场缺席签到、厨房
+  feed 落点守卫、瞬时 UNKNOWN、签后面板分类、sign 对账 ×2、ad-claim 药丸
+  谓词与对账 ×3）。
+- 待 09-29：farm 抽屉领取+施肥段、kitchen 重开路径、donate Back 路由在全链
+  中的真机锻炼（fertilizer-claim/fertilization 历史零命中）。
+
+## 2026-09-27：五个失败的帧级根因与四项修复
+
+- 全天终态（12:15-13:17 链）：**17 SUCCESS** + 2 SKIPPED（reward_friends 条件
+  缺席、bring_home 鸡在家）+ 5 FAILED（diary/farm/kitchen/member/rain），退出码
+  只表终止、真值读 `runtime/task_state.db`。
+- `manor.feed.farm` `80393d` FAILED——**欢迎卡标签行的 reward 误报**：入场欢迎卡
+  （欢迎来到芭芭农场/2100肥料待领取/签到领肥 CTA/×）标签行 OCR 合并成
+  `明日肥料获得奖励每日签到`，命中 reward 规则 → overlays=[reward] → ex.wait
+  中断处理进 dismiss()，其 reward 支找不到 开心收下|我知道啦 锚、落到 **Back**，
+  0012 帧 12:37:46（倒计时归零、自动跳转前 1 秒）被打出农场回 feed，
+  `farm-jump` 等待在 page=feed 上饿死。9d8f76（09-25）对照帧证明跳转本就在
+  欢迎卡仍屏时触发——卡是自管理状态，不是可解散奖励。修复 = classify 对含
+  `欢迎来到芭芭农场` 的帧跳过 reward；表象是误报，根治在分类层而非 Back 兜底。
+- `manor.feed.kitchen` `a520fb` FAILED——**结果模态帧分类饿死**：烹饪已成功
+  （橄榄烤彩椒制作成功/厨余生成了58肥料/新解锁+1），但新 pity 横幅
+  （5次内必解锁一道新的美食哦）挤掉 普通美食、领取行 OCR 成无今日的 领食材、
+  店铺按钮被遮——group1 三锚全失，唯一幸存是事件头 秋食风味录 →
+  page=UNKNOWN → `s.back` 前置校验拒绝 `Cannot act on unknown page`，做完了
+  关不掉。修复 = kitchen group1 追加 秋食风味录（09-24..27 全帧扫描仅厨房与
+  厨房模态帧携带：76 kitchen + 36 模态、零外部页面）。
+- `manor.feed.member` `e7673b` FAILED——**返回落点栈深与昨日不同**：广告任务
+  中心签到成功后一次 Back 落在支付宝会员首页（小组件推广层 领积分兑好礼更方便/
+  添加会员小组件到桌面/待领积分），该页无分类 → page=UNKNOWN，`("feed",)` 落点
+  等待饿死。09-26 `0a42ca` 同一步一次 Back 直达 feed（栈里没有会员首页层）。
+  修复三件套：classify 新增 member 规则（group1 待领积分|领积分兑好礼|
+  添加会员小组件，group2 会员|积分）+ `parents["member"]="feed"` 入路由表 +
+  browse 返回收 `("feed","member")`、非 feed 时 `ensure("feed")` 兜底走规范
+  路由。首版锚含 会员中心，在帧回放中暴露 699443 森林任务行
+  `逛支付宝会员中心` 子串假阳 10 帧——移除该锚后归零。
+- `forest.rain` `c59b7f` FAILED——**同文按钮的死点抽奖**：礼物面板三个同文
+  送TA机会（手型指引贴最左、OCR 成 送T 不入选择集），min-by-(y,x) 选中中间
+  (655,1807) 死等 40s；09-26 `06fb5b` 选右侧 (936,1807) 应答成功。两日中/右
+  按钮像素均值完全一致（[87.7,203.3,145.9]/[87.9,203.3,146]），非置灰——朋友
+  列表每日轮换，任一按钮都可能是死点。修复 = 候选遍历（右按钮优先，证据即
+  右侧曾应答）+ 超时对账（面板仍供给 affordance ⇒ 提交从未生效 CANCELLED，
+  换下一按钮；面板已关 ⇒ 慢成功放行）+ 全部死点 fail-closed 重抛 TIMEOUT。
+- `manor.home.diary` `854b77` FAILED、`7b5156` 13:33 复跑仍 FAILED：4 帧模板分
+  全背景级（0.548-0.572）、60s×20 高频采样无闪现——书服务端状态缺席（延续
+  09-26 假说，非采样漏）。
+- 修复验证 = **HEAD vs 工作区隔离回放 4010 帧**（09-24..27 真机帧重建
+  Observation 重分类）：UNKNOWN→kitchen 30、UNKNOWN→member 11（全部真会员首页）、
+  0 抢页（既有识别页零漂移）、reward 摘除恰 2 帧（9d8f76/0014、80393d/0012，
+  均为欢迎卡）——用历史全量帧当回归集，比单测更早揪出 会员中心 假阳。
+- 门禁：ruff clean，**173 passed**（+7：厨房模态/会员首页/森林行防假阳/欢迎卡
+  reward、browse 会员落点、rain 候选回退 ×2）。
+- 晚间基础设施：USB 掉线（usbipd 仅 persisted 无 Connected、WSL 只剩 root hub，
+  15s 轮询不恢复）需手机侧重插；期间用户取走手机复还、支付宝进程被杀
+  （monkey 注入无窗口，`am start -n com.eg.android.AlipayGphone/.AlipayLogin`
+  恢复）——真机复跑顺延至 09-28。
+
 ## 2026-09-26：厨房真机结果模态、外出木牌双变体与日记本全帧取证
 
 - 全天终态：**18 SUCCESS** + 3 ALREADY_DONE（sign/farm/kitchen）+ 2 SKIPPED
