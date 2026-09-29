@@ -124,6 +124,21 @@ class ManorHome:
 
     def diary(self):
         s = self.s
+        # Device evidence (2026-09-29, runs 5742c4 -> 97e388): the red
+        # diary book IS the 贴贴 entry (spec L10) and it vanishes from the
+        # manor once the day's diary has been read - the 09:31 read left
+        # the 10:06 manor with no 小鸡日记 anchor at all (found 0 across
+        # four frames), so the always-reprobe re-run died even though the
+        # task had been page-verified hours earlier. Anchor absent plus
+        # that verified business-day record is the completion evidence;
+        # without the record the missing anchor must still fail the first
+        # attempt.
+        obs = s.observe("diary-entry")
+        if (not obs.find("小鸡日记|^日记$")
+                and s.ex.store.verified_status(s.task)
+                in ("SUCCESS", "ALREADY_DONE")):
+            s.done(obs, already=True)
+            return
         obs = s.ensure("diary")
         if obs.has("明日再来"):
             s.done(obs, already=True)

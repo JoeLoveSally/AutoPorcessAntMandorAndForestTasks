@@ -1,8 +1,9 @@
 """Offline business-state tests; these do not validate real-device selectors."""
 
 import unittest
+from types import SimpleNamespace
 
-from domain_data import Element, Observation
+from domain_data import AutomationError, Element, Observation
 from workflow.manor.home import ManorHome
 
 
@@ -15,11 +16,17 @@ class FakeSession:
     def __init__(self, first, after):
         self.first, self.after = first, after
         self.config = {}
+        self.task = "manor.home.diary"
         self.done_args = []
         self.taps = []
         self.back_calls = []
+        self.ensure_calls = []
+        self.verified = None
+        self.ex = SimpleNamespace(store=SimpleNamespace(
+            verified_status=lambda _task: self.verified))
 
     def ensure(self, page):
+        self.ensure_calls.append(page)
         return self.first
 
     def observe(self, reason):
@@ -77,6 +84,41 @@ class ManorHomeTests(unittest.TestCase):
         self.assertTrue(session.taps[0][1]["spend"])
         self.assertEqual(session.done_args, [{}])
         self.assertEqual(session.back_calls, [("manor",)])
+
+    def test_consumed_diary_entry_with_the_days_record_is_already_done(self):
+        # Device evidence (2026-09-29, runs 5742c4 -> 97e388): reading the
+        # diary removed the red book entry from the manor, so the
+        # always-reprobe re-run found no 小鸡日记 anchor across four frames
+        # - anchor absent plus the day's page-verified record is the
+        # completion evidence, and ensure("diary") must not be attempted.
+        manor = observation("1", ["领饲料", "家庭"], page="manor")
+        session = FakeSession(manor, manor)
+        session.verified = "SUCCESS"
+        ManorHome(session).diary()
+        self.assertEqual(session.ensure_calls, [])
+        self.assertEqual(session.done_args, [{"already": True}])
+        self.assertEqual(session.taps, [])
+        self.assertEqual(session.back_calls, [])
+
+    def test_consumed_entry_without_a_record_still_fails_the_first_attempt(self):
+        # The same probe without the verified record must keep the
+        # fail-closed routing: a first attempt missing its entry is a real
+        # error, never a silent skip.
+        manor = observation("1", ["领饲料", "家庭"], page="manor")
+
+        class MissingEntrySession(FakeSession):
+            def ensure(self, page):
+                self.ensure_calls.append(page)
+                raise AutomationError(
+                    "Expected unique target 小鸡日记|^日记$: found 0", "AMBIGUOUS")
+
+        session = MissingEntrySession(manor, manor)
+        session.verified = None
+        with self.assertRaises(AutomationError):
+            ManorHome(session).diary()
+        self.assertEqual(session.ensure_calls, ["diary"])
+        self.assertEqual(session.done_args, [])
+        self.assertEqual(session.taps, [])
 
 
 if __name__ == "__main__":
