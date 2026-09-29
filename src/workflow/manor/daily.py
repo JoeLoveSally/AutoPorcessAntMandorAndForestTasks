@@ -329,7 +329,21 @@ class Manor:
                                           and abs(e.point[1] - pill.point[1]) < 20
                                           for e in o.elements),
                               name="fertilizer-claim", spend=True)
-        s.back(("farm",))
+        # Device evidence (2026-09-29, run 5742c4): the spec's exit from the
+        # auto-jumped drawer is its top-right X (L67 点击右上角"X"关闭
+        # "做任务集肥料"页面) - one Android Back from the drawer closed the
+        # whole 芭芭农场 container and landed on feed (the same on 09-27, run
+        # 80393d), starving back(("farm",)). The X rides the fixed drawer
+        # header: 做任务集肥料 held bounds [533,1085,906,1150] across all 23
+        # drawer frames today (scroll included) and the circle sits at title
+        # center + (+535,-28) with r≈57 (frame 0296-507a60).
+        header = s.obs.one("做任务集肥料")
+        cx = int((header.bounds[0] + header.bounds[2]) / 2 + 535)
+        cy = int((header.bounds[1] + header.bounds[3]) / 2 - 28)
+        target = Element("关闭做任务集肥料", (cx - 60, cy - 60, cx + 60, cy + 60),
+                         s.obs.id)
+        s.tap_element(s.obs, target, lambda o: o.page == "farm",
+                      name="drawer-close")
         if s.obs.has("点击领取"):
             s.tap("点击领取", lambda o:o.page == "farm" and not o.has("点击领取"), spend=True)
         for index in range(2):

@@ -43,6 +43,7 @@ class FarmSession:
         self.row_calls = []
         self.claim_taps = 0
         self.backs = []
+        self.drawer_closed = False
 
     def row(self, title, required=True, reset=False, page="feed"):
         self.row_calls.append(title)
@@ -61,6 +62,14 @@ class FarmSession:
         elif name == "fertilizer-claim":
             assert predicate(self.claimed)
             self.claim_taps += 1
+        elif name == "drawer-close":
+            # Device evidence (2026-09-29, run 5742c4): the drawer exits via
+            # its top-right X, never via Back - Back left the whole
+            # container and landed on feed, starving back(("farm",)).
+            assert button.text == "关闭做任务集肥料"
+            assert predicate(self.home)
+            self.drawer_closed = True
+            self.obs = self.home
         else:
             raise AssertionError(f"unexpected tap_element {name}")
 
@@ -76,7 +85,10 @@ class FarmSession:
         raise Stop
 
     def tap(self, pattern, predicate, **kwargs):
-        raise AssertionError(f"claims must precede fertilizing, got {pattern}")
+        # Reaching 施肥 means the claims and the X close all ran in order;
+        # the fertilization stage itself stays out of this unit's scope.
+        assert pattern == "^施肥$"
+        raise Stop
 
 
 def test_farm_waits_for_the_spec_auto_jump_before_drawer_claims():
@@ -88,7 +100,8 @@ def test_farm_waits_for_the_spec_auto_jump_before_drawer_claims():
     assert session.wait_calls == ["farm-jump"]
     assert session.row_calls == ["^去芭芭农场", "蚂蚁庄园小鸡肥料", "每日签到"]
     assert session.claim_taps == 2
-    assert session.backs == [("farm",)]
+    assert session.drawer_closed is True
+    assert session.backs == []
 
 
 def test_absent_sign_row_is_skipped_and_the_durable_claim_still_fires():
@@ -105,4 +118,5 @@ def test_absent_sign_row_is_skipped_and_the_durable_claim_still_fires():
 
     assert session.row_calls == ["^去芭芭农场", "蚂蚁庄园小鸡肥料", "每日签到"]
     assert session.claim_taps == 1
-    assert session.backs == [("farm",)]
+    assert session.drawer_closed is True
+    assert session.backs == []
