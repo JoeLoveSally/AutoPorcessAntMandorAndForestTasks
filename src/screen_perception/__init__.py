@@ -243,15 +243,24 @@ def classify(observation):
     # middle of the常用 icon row - 蚂蚁森林 and 游戏中心 sit behind it -
     # while the bottom nav stayed readable, so the page still classified
     # alipay, overlays stayed empty, and the forest entry tap found 0. The
-    # card carries no close text: its floating circle sits below the card
-    # around 69% screen height. The card text gates the scan so the round
-    # icons of a clean home can never trigger it.
+    # card carries no close text: its floating circle sits below the card.
+    # The circle travels with the card template: .687h on 09-25, but the
+    # 09-29 re-promotion (领12张, run b8d5e5) renders a taller card whose
+    # circle floats at .85h and whose anchor the failed run read as
+    # 蚂庄园 - the card's left edge clipped the 蚂. A single Back press
+    # exits Alipay outright (09-29, measured on that very frame), so the
+    # tap-on-circle stays the only closer: search the whole band below
+    # the card and take the lowest centered circle - the CTA button and
+    # card art sit above the circle, the bottom nav is past the band, and
+    # the notification toast's own close is off-center. The card text
+    # gates the scan so the round icons of a clean home can never
+    # trigger it.
     if observation.page == "alipay" and observation.has("广州生活卡|组合券包") \
             and observation.image is not None:
         image = observation.image
         h, w = image.shape[:2]
         x0, y0 = int(w * .35), int(h * .62)
-        crop = cv2.cvtColor(image[y0:int(h * .80), x0:int(w * .65)], cv2.COLOR_BGR2GRAY)
+        crop = cv2.cvtColor(image[y0:int(h * .90), x0:int(w * .65)], cv2.COLOR_BGR2GRAY)
         if crop.size:
             blurred = cv2.GaussianBlur(crop, (5, 5), 1.2)
             circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, 1.2, 80,
@@ -259,15 +268,11 @@ def classify(observation):
                                        minRadius=max(20, int(w * .025)),
                                        maxRadius=max(40, int(w * .06)))
             if circles is not None:
-                expected = (crop.shape[1] / 2, crop.shape[0] * .40)
-                circle = min(
-                    circles[0],
-                    key=lambda item: (float(item[0]) - expected[0]) ** 2
-                    + (float(item[1]) - expected[1]) ** 2,
-                )
-                distance = ((float(circle[0]) - expected[0]) ** 2
-                            + (float(circle[1]) - expected[1]) ** 2) ** .5
-                if distance <= w * .07:
+                center = crop.shape[1] / 2
+                centered = [item for item in circles[0]
+                            if abs(float(item[0]) - center) <= w * .07]
+                if centered:
+                    circle = max(centered, key=lambda item: float(item[1]))
                     observation.overlays.append("home_promo")
                     observation.elements.append(
                         close_circle_element(observation, circle, (x0, y0)))

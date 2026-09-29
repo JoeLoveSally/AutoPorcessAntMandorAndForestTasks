@@ -155,6 +155,31 @@ def test_home_coupon_modal_is_a_dismissible_overlay_with_close_control():
     assert abs(close[0].point[1] / obs.height - .687) < .03
 
 
+def test_home_coupon_modal_tall_template_keeps_its_low_close_control():
+    # Real-device evidence (2026-09-29, run b8d5e5): the same 广州生活卡
+    # slot re-rendered as a taller 领12张 card - its circle sits at .85h,
+    # past the 09-25 scan band's .80h edge, so overlays stayed empty and
+    # the chain's first anchor OCR read 蚁庄园 (the card's left edge
+    # clipped 蚂) before failing with "found 0". A Back press on that
+    # frame exits Alipay outright (measured), and the circle still
+    # floats centered below the CTA button - the lowest centered circle
+    # in the band is the close control on both templates.
+    obs = screen_observation(
+        "home-promo-0929",
+        ["扫一扫", "收付款", "出行", "卡包", "广州生活卡限时放送", "领12张",
+         "可爆涨外卖红包", "立即领取", "蚁庄园", "芭芭农", "常用",
+         "为你推荐", "推荐", "消息", "我的"],
+        "home_promo_0929.jpg",
+    )
+
+    assert obs.page == "alipay"
+    assert obs.overlays == ["home_promo"]
+    close = [element for element in obs.elements if element.text == "广告关闭"]
+    assert len(close) == 1
+    assert abs(close[0].point[0] / obs.width - .5) < .03
+    assert abs(close[0].point[1] / obs.height - .85) < .03
+
+
 def test_home_without_the_coupon_signature_is_never_flagged_from_vision_alone():
     # The circle scan must stay gated on the card's text: the normal home
     # shows round icons in the same lower band and must not be dimmed into
