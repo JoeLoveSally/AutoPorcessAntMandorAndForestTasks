@@ -180,6 +180,26 @@ def test_home_coupon_modal_tall_template_keeps_its_low_close_control():
     assert abs(close[0].point[1] / obs.height - .85) < .03
 
 
+def test_clean_home_with_the_banner_copy_is_not_reflagged_after_dismissal():
+    # Real-device evidence (2026-09-29, run 4374cb): once the modal closed,
+    # the home's own 广州生活卡限时放送 banner kept satisfying the text gate,
+    # the second dismissal hunted a circle on the clean page, tapped it,
+    # and the chain fell out of the page (postcondition return/UNKNOWN,
+    # then Back exited Alipay). The modal's backdrop dims the band left of
+    # the card to ~65 gray while this clean frame reads ~220 - the dim
+    # gate must keep overlays empty on the very copy that fooled the text.
+    obs = screen_observation(
+        "home-clean-banner",
+        ["扫一扫", "收付款", "出行", "卡包", "广州生活卡限时放送", "点击领取",
+         "400元", "市民中心", "蚂蚁庄园", "芭芭农场", "蚂蚁森林", "常用",
+         "最近消息", "为你推荐", "推荐", "我的"],
+        "home_clean_banner_0929.jpg",
+    )
+
+    assert obs.page == "alipay"
+    assert obs.overlays == []
+
+
 def test_home_without_the_coupon_signature_is_never_flagged_from_vision_alone():
     # The circle scan must stay gated on the card's text: the normal home
     # shows round icons in the same lower band and must not be dimmed into

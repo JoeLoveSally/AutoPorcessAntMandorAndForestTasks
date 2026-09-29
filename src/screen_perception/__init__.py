@@ -259,23 +259,35 @@ def classify(observation):
             and observation.image is not None:
         image = observation.image
         h, w = image.shape[:2]
-        x0, y0 = int(w * .35), int(h * .62)
-        crop = cv2.cvtColor(image[y0:int(h * .90), x0:int(w * .65)], cv2.COLOR_BGR2GRAY)
-        if crop.size:
-            blurred = cv2.GaussianBlur(crop, (5, 5), 1.2)
-            circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, 1.2, 80,
-                                       param1=100, param2=45,
-                                       minRadius=max(20, int(w * .025)),
-                                       maxRadius=max(40, int(w * .06)))
-            if circles is not None:
-                center = crop.shape[1] / 2
-                centered = [item for item in circles[0]
-                            if abs(float(item[0]) - center) <= w * .07]
-                if centered:
-                    circle = max(centered, key=lambda item: float(item[1]))
-                    observation.overlays.append("home_promo")
-                    observation.elements.append(
-                        close_circle_element(observation, circle, (x0, y0)))
+        # Device evidence (2026-09-29, run 4374cb): the home's own banner
+        # repeats 广州生活卡限时放送, so the card text alone no longer
+        # separates the modal from the clean home it was just closed to -
+        # the second dismissal hunt found a "circle" on the clean page,
+        # tapped it, and the chain fell out of the page. The modal's
+        # backdrop dims the band left of the card to mean gray ~65 while
+        # the clean home's feed reads ~220 (both templates, 09-25 and
+        # 09-29) - gate the scan on that physics, not on the copy.
+        band = cv2.cvtColor(image[int(h * .62):int(h * .90), 0:int(w * .10)],
+                            cv2.COLOR_BGR2GRAY)
+        dimmed = band.size and cv2.mean(band)[0] < 140
+        if dimmed:
+            x0, y0 = int(w * .35), int(h * .62)
+            crop = cv2.cvtColor(image[y0:int(h * .90), x0:int(w * .65)], cv2.COLOR_BGR2GRAY)
+            if crop.size:
+                blurred = cv2.GaussianBlur(crop, (5, 5), 1.2)
+                circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, 1.2, 80,
+                                           param1=100, param2=45,
+                                           minRadius=max(20, int(w * .025)),
+                                           maxRadius=max(40, int(w * .06)))
+                if circles is not None:
+                    center = crop.shape[1] / 2
+                    centered = [item for item in circles[0]
+                                if abs(float(item[0]) - center) <= w * .07]
+                    if centered:
+                        circle = max(centered, key=lambda item: float(item[1]))
+                        observation.overlays.append("home_promo")
+                        observation.elements.append(
+                            close_circle_element(observation, circle, (x0, y0)))
     # Device evidence (2026-09-26, run 7d8d95): about two beats after the
     # spec's auto-jump opens the 做任务集肥料 drawer, the timed promo card
     # (领3000肥料 / 玩寻道大千砍树20次即得 / 限时翻倍) pops as a modal whose
