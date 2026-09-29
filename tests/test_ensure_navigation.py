@@ -7,13 +7,13 @@ for a page that Back can never reach from there.
 
 from types import SimpleNamespace
 
-from domain_data import Element, Observation
+from domain_data import AutomationError, Element, Observation
 from workflow.session import Session
 
 
-def observation(oid, texts=(), *, page):
+def observation(oid, texts=(), *, page, package="alipay"):
     elements = [Element(text, bounds, oid) for text, bounds in texts]
-    return Observation(oid, 0.0, 1440, 3200, "alipay", elements, page)
+    return Observation(oid, 0.0, 1440, 3200, package, elements, page)
 
 
 class FakeExecutor:
@@ -62,6 +62,37 @@ def test_ensure_replans_route_when_back_lands_on_an_unexpected_page():
     session = Session(executor, {"package": "alipay"})
 
     assert session.ensure("forest") is forest
+    assert [call[2] for call in executor.back_calls] == ["return"]
+    assert executor.tap_calls == ["^蚂蚁森林$"]
+
+
+def test_ensure_falls_through_a_starved_launch_wait_into_the_back_route():
+    # Real-device evidence (2026-09-29, run 184e67): after an interrupted
+    # run the relaunch restored the home on its 闪购外卖 channel - unknown to
+    # the three-word home rule - and the launch wait starved on page=UNKNOWN
+    # instead of falling through to the routing loop's Back route (the
+    # recognize wait's documented recovery below).
+    class LaunchTimeoutExecutor(FakeExecutor):
+        def wait(self, predicate, timeout, reason):
+            self.wait_calls.append(reason)
+            if reason == "launch":
+                raise AutomationError(f"Postcondition failed: {reason}", "TIMEOUT")
+            return super().wait(predicate, timeout, reason)
+
+    entry = observation("1", page="UNKNOWN", package="launcher")
+    channel = observation("2", page="UNKNOWN")
+    still_channel = observation("3", page="UNKNOWN")
+    home = observation("4", [("蚂蚁森林", (300, 1540, 620, 1640))], page="alipay")
+    home_before_tap = observation("5", [("蚂蚁森林", (300, 1540, 620, 1640))],
+                                  page="alipay")
+    forest = observation("6", page="forest")
+    executor = LaunchTimeoutExecutor([entry, channel, still_channel, home,
+                                      home_before_tap, forest])
+    executor.device = SimpleNamespace(launch=lambda _package: None)
+    session = Session(executor, {"package": "alipay"})
+
+    assert session.ensure("forest") is forest
+    assert executor.wait_calls == ["launch"]
     assert [call[2] for call in executor.back_calls] == ["return"]
     assert executor.tap_calls == ["^蚂蚁森林$"]
 

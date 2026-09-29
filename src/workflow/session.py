@@ -183,7 +183,16 @@ class Session:
             return obs
         if obs.package != self.config["package"]:
             self.ex.device.launch(self.config["package"])
-            obs = self.wait(lambda o: o.page != "UNKNOWN", "launch")
+            try:
+                obs = self.wait(lambda o: o.page != "UNKNOWN", "launch")
+            except AutomationError:
+                # Device evidence (2026-09-29, run 184e67): after an
+                # interrupted run the relaunch restored the home on its
+                # 闪购外卖 channel, which the three-word home rule cannot
+                # classify - the launch wait starved exactly like the
+                # recognize wait below documents, and the routing loop's
+                # Back branch is the designed route out of it.
+                obs = self.observe("launch-fallthrough")
         elif obs.page == "UNKNOWN":
             # The package already matches, but one glitchy OCR frame must not
             # abort navigation before the screen is recognized at all.
