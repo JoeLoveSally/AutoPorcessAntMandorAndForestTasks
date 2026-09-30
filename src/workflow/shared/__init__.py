@@ -211,8 +211,11 @@ def lottery(s, ads, exchange=False):
         # 我知道了 CTA instead of 做任务继续抽; spec L56/L63 (videos 02:03
         # and 03:54) document the 获得奖励 popup closed through 开心收下,
         # which the draw's own postcondition already accepts - so take all
-        # three documented spellings.
-        s.tap("做任务继续抽|我知道了|开心收下",
+        # three documented spellings. Device evidence (2026-09-30, run
+        # 573250): the permanent-suit prize (恭喜抽中 6件奖品 永久套装)
+        # swapped the CTA to 穿上装扮 again - a fourth spelling of the same
+        # dismiss, still on the same dimmed result view over the lottery.
+        s.tap("做任务继续抽|我知道了|开心收下|穿上装扮",
               lambda o: o.page == "lottery"
               and not o.has("恭喜抽中|做任务继续抽"),
               # Device evidence (2026-09-23, run 115920): the executor's

@@ -307,3 +307,29 @@ def test_retry_cancels_the_stale_ad_claim_while_the_pill_still_offers(monkeypatc
 
     assert session.ex.store.verified == [(11, "CANCELLED", "still-offered")]
     assert "^[立三主]即抽奖$" in session.taps
+
+
+def test_result_view_close_takes_the_suit_cta_spelling(monkeypatch):
+    # Device evidence (2026-09-30, run 573250): the permanent-suit prize
+    # rendered 恭喜抽中 6件奖品 with a lone 穿上装扮 CTA on the dimmed
+    # result view - a fourth spelling of the same dismiss after 开心收下 /
+    # 做任务继续抽 / 我知道了 - and the three-spelling anchor failed closed
+    # with found 0 across three identical frames.
+    result = obs("UNKNOWN", ["恭喜抽中", "6件奖品",
+                             "已放入装扮列表-永久套装", "穿上装扮"], "suit")
+    monkeypatch.setattr(shared_workflow, "dismiss", lambda session: result)
+    session = FakeLottery()
+
+    lottery(session, 0)
+
+    pattern = "做任务继续抽|我知道了|开心收下|穿上装扮"
+    assert pattern in session.taps
+    predicate, kwargs = session.taps[pattern]
+    # The closed view is the recognizable lottery page without the result
+    # header; the dimmed result view itself must never satisfy it.
+    assert predicate(obs("lottery", ["装扮抽抽乐", "还剩6次机会",
+                                     "立即抽奖"], "closed"))
+    assert not predicate(result)
+    assert not predicate(obs("lottery", ["恭喜抽中", "还剩6次机会"],
+                             "header-left"))
+    assert kwargs == {"allow_unknown": True}
