@@ -155,6 +155,23 @@ def classify(observation):
         if all(observation.has(p) for p in patterns):
             observation.page = name
             break
+    # Device evidence (2026-10-08, run 95ece9): this week's farm home grew
+    # a bottom entry bar reading 做任务集肥料 ([535,3053,908,3117], .95h)
+    # while the drawer's own header anchors at .34h ([535,1090,908,1154],
+    # and list content only scrolls upward from there), so the bare-text
+    # farm_tasks rule took the closed-drawer home for the drawer and
+    # drawer-close's page=="farm" postcondition could never hold. Only a
+    # marker riding the top of the viewport is the drawer; one living
+    # exclusively along the bottom edge is the home's entry bar, and the
+    # farm rule then decides the frame.
+    if observation.page == "farm_tasks":
+        markers = observation.find("做任务集肥料")
+        if (markers
+                and all(marker.point[1] > observation.height * .8
+                        for marker in markers)
+                and observation.has("芭芭农场")
+                and observation.has("施肥|肥料")):
+            observation.page = "farm"
     # Both feed-claim blockers count as "overflow": spec L29's discard-confirm
     # (超过上限) and the zero-headroom refusal observed 2026-09-24 (run
     # 0ace75) 饲料袋已满 / 先消耗一些饲料再来领取吧~ - OCR also misreads 已 as 巴.
@@ -174,6 +191,23 @@ def classify(observation):
             # the drawer landing while the card is still on screen) and the
             # jump wait then starved on page=feed. The card is self-managing
             # state, never a dismissible reward.
+            continue
+        if (name == "reward"
+                and observation.page in ("farm", "farm_tasks")
+                and not observation.has("开心收下|我知道啦|去蚂蚁森林收能量")):
+            # Device evidence (2026-10-08, run 95ece9): the farm home's
+            # persistent 参与施肥挑战赢大额奖励 card (new this week; its line
+            # matches the 施肥挑战 arm) and the transient 肥料+2100 claim
+            # toast - which OCRs beside a 获得奖励 label row, on drawer
+            # frames too - are content or self-managing state, never
+            # dismissible popups. Classifying them sent dismiss() down its
+            # CTA-less fallback and one Back walked the whole 芭芭农场
+            # container out to feed (frame 0037 -> 0038, killing
+            # drawer-close's postcondition hunt). Real reward popups inside
+            # this container keep their CTA or the spec L67 forest
+            # cross-promo line (去蚂蚁森林收能量, closed directly), and the
+            # 施肥挑战 popup needs no overlay: daily.py reads it off the
+            # text and backs out itself (L352).
             continue
         if observation.has(pattern):
             observation.overlays.append(name)

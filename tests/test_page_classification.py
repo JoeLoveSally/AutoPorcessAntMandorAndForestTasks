@@ -563,6 +563,68 @@ def test_clean_alipay_home_is_never_flagged_as_update_prompt():
     assert obs.overlays == []
 
 
+def test_farm_home_bottom_entry_classifies_as_farm_and_fires_no_reward():
+    # Device evidence (2026-10-08, run 95ece9): this week's farm home
+    # carries a bottom entry bar reading 做任务集肥料 (index-placed at
+    # .96h by this helper, mirroring the device's [535,3053,908,3117]);
+    # the bare-text rule took it for the drawer (header at .34h) so
+    # drawer-close's page=="farm" postcondition could never hold, and its
+    # wait then let the CTA-less reward fallback Back the container out to
+    # feed. The challenge card's 参与施肥挑战赢大额奖励 also matches reward's
+    # 施肥挑战 arm - neither may classify here.
+    obs = screen_observation(
+        "farm-home-bottom-entry",
+        ["支付宝·芭芭农场", "合种>", "种摇钱树", "施肥赢3000肥料", "开始",
+         "参与施肥挑战赢大额奖励", "限时挑战", "04:33", "还差了次领肥",
+         "14级", "苹果2箱", "一键施肥5次", "领600肥", "施肥",
+         "农场乐园", "肥料33410", "领肥料", "做任务集肥料"],
+        "farm_home_bottom_entry.jpg",
+    )
+
+    assert obs.page == "farm"
+    assert obs.overlays == []
+
+
+def test_drawer_header_at_the_top_stays_farm_tasks():
+    # The fixup only fires for markers living along the bottom edge: the
+    # drawer's header rides the top of the viewport and its list content
+    # scrolls only upward, so a top-anchored marker stays the drawer.
+    obs = screen_observation(
+        "drawer-header-top",
+        ["做任务集肥料", "支付宝·芭芭农场", "每日签到", "蚂蚁庄园小鸡肥料",
+         "领取"],
+        "farm_home_bottom_entry.jpg",
+    )
+
+    assert obs.page == "farm_tasks"
+
+
+def test_farm_claim_toast_is_not_a_reward_overlay():
+    # The 肥料+2100 claim toast OCRs beside a 获得奖励 label (run 95ece9,
+    # frame 0011) - content, not a popup; the fallback Back for it would
+    # walk the container out to feed.
+    obs = screen_observation(
+        "farm-claim-toast",
+        ["支付宝·芭芭农场", "施肥", "肥料", "获得奖励", "肥料+2100"],
+        "farm_fertilize_home.jpg",
+    )
+
+    assert obs.page == "farm"
+    assert "reward" not in obs.overlays
+
+
+def test_farm_reward_popups_with_a_close_path_stay_classified():
+    # The spec L67 forest cross-promo (直接关闭 through the fallback Back
+    # on its modal) and CTA result popups keep their reward branches.
+    for texts in (["支付宝·芭芭农场", "施肥", "肥料", "去蚂蚁森林收能量"],
+                  ["支付宝·芭芭农场", "施肥", "肥料", "开心收下"]):
+        obs = screen_observation("farm-reward-popup", texts,
+                                 "farm_fertilize_home.jpg")
+
+        assert obs.page == "farm"
+        assert "reward" in obs.overlays
+
+
 def test_kitchen_result_modal_classifies_from_the_event_header():
     # Device evidence (2026-09-27, run a520fb): the cook-result modal hides
     # the store button and the claim row reads plain 领食材 (no 今日) while
