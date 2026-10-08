@@ -27,8 +27,28 @@ class Stop(Exception):
     pass
 
 
+class FarmExecutor:
+    """Executor stub for recovery's close-circle branch (run f427d5)."""
+
+    def __init__(self, session):
+        self.session = session
+        self.closes = []
+
+    def tap(self, obs, element, predicate, name, task, **kwargs):
+        assert element.text == "广告关闭"
+        assert name == "close-farm-gift"
+        assert kwargs.get("allow_overlay") is True
+        # The close must satisfy recovery's overlay-removal predicate on
+        # the farm home underneath - Android Back would have left the
+        # whole 芭芭农场 container for feed instead.
+        assert predicate(self.session.home)
+        self.closes.append(name)
+        self.session.obs = self.session.home
+        return self.session.home
+
+
 class FarmSession:
-    def __init__(self):
+    def __init__(self, tail=False):
         self.task = "manor.feed.farm"
         self.absent = set()
         self.home = observation("home", ["支付宝·芭芭农场", "施肥", "肥料"],
@@ -38,12 +58,34 @@ class FarmSession:
         self.claimed = observation("claimed", ["做任务集肥料", "每日签到",
                                                "已领取", "蚂蚁庄园小鸡肥料"],
                                    "farm_tasks")
+        self.fert_prompt = observation("fert-prompt", ["支付宝·芭芭农场",
+                                                       "施肥", "主即领肥"],
+                                       "farm")
+        self.popup_pending = observation(
+            "popup-pending", ["支付宝·芭芭农场", "丰收礼包待领取", "肥料",
+                              "立即领取"], "farm")
+        self.popup_claimed = observation(
+            "popup-claimed", ["支付宝·芭芭农场", "半收礼包已领取", "肥料",
+                              "点此逛一逛再赚1000肥料>"], "farm")
+        # The vision rule classifies the popup as farm_gift with its
+        # bottom-center close circle (device 2026-09-30, run f427d5).
+        for popup in (self.popup_pending, self.popup_claimed):
+            popup.overlays.append("farm_gift")
+            popup.elements.append(
+                Element("广告关闭", (660, 2261, 780, 2381), popup.id))
         self.obs = self.home
+        self.tail = tail
+        self.fertilizations = 0
+        self.claim_rides_overlay = False
+        self.ex = FarmExecutor(self)
         self.wait_calls = []
         self.row_calls = []
         self.claim_taps = 0
         self.backs = []
         self.drawer_closed = False
+
+    def observe(self, reason="observe"):
+        return self.obs
 
     def row(self, title, required=True, reset=False, page="feed"):
         self.row_calls.append(title)
@@ -85,10 +127,34 @@ class FarmSession:
         raise Stop
 
     def tap(self, pattern, predicate, **kwargs):
-        # Reaching 施肥 means the claims and the X close all ran in order;
-        # the fertilization stage itself stays out of this unit's scope.
-        assert pattern == "^施肥$"
-        raise Stop
+        if not self.tail:
+            # Reaching 施肥 means the claims and the X close all ran in
+            # order; the fertilization stage itself stays out of this
+            # unit's scope.
+            assert pattern == "^施肥$"
+            raise Stop
+        if pattern == "^施肥$":
+            if self.fertilizations:
+                # Round 2 only re-runs what round 1 already proved.
+                raise Stop
+            assert predicate(self.fert_prompt)
+            self.fertilizations += 1
+            self.obs = self.fert_prompt
+        elif pattern == "[立三主]即领肥":
+            assert predicate(self.popup_pending)
+            self.obs = self.popup_pending
+        elif pattern == "[立三主]即领取":
+            # The popup is classified farm_gift: without riding the
+            # overlay through, session.tap would dismiss it before
+            # targeting and never find the claim CTA.
+            if not kwargs.get("overlay"):
+                raise AssertionError("claim tap must allow the overlay")
+            self.claim_rides_overlay = True
+            assert predicate(self.popup_claimed)
+            self.obs = self.popup_claimed
+        else:
+            raise AssertionError(f"unexpected tap {pattern}")
+        return self.obs
 
 
 def test_farm_waits_for_the_spec_auto_jump_before_drawer_claims():
@@ -119,4 +185,23 @@ def test_absent_sign_row_is_skipped_and_the_durable_claim_still_fires():
     assert session.row_calls == ["^去芭芭农场", "蚂蚁庄园小鸡肥料", "每日签到"]
     assert session.claim_taps == 1
     assert session.drawer_closed is True
+    assert session.backs == []
+
+
+def test_fertilize_tail_claims_through_the_overlay_and_closes_its_circle():
+    # Device evidence (2026-09-30, run f427d5): the first fertilize round
+    # claimed 600肥料 and then one Android Back from the 丰收礼包 popup
+    # left the whole 芭芭农场 container for feed (spec L67 closes it with
+    # the popup's X), starving back(("farm",)). The claim must ride the
+    # classified overlay through (session.tap dismisses overlays before
+    # targeting) and the exit must be recovery's close circle - the tail
+    # must never press Android Back.
+    session = FarmSession(tail=True)
+
+    with pytest.raises(Stop):
+        Manor(session).farm()
+
+    assert session.drawer_closed is True
+    assert session.claim_rides_overlay is True
+    assert session.ex.closes == ["close-farm-gift"]
     assert session.backs == []

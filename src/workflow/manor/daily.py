@@ -352,8 +352,18 @@ class Manor:
             if s.obs.has("施肥挑战"):
                 s.back(("farm",))
             s.tap("[立三主]即领肥", lambda o:o.has("丰收礼包"))
-            s.tap("[立三主]即领取", lambda o:not o.has("[立三主]即领取"), spend=True)
-            s.back(("farm",))
+            # Device evidence (2026-09-30, run f427d5): the claim tap finds
+            # the popup already classified farm_gift, so it must ride the
+            # overlay through (session.tap dismisses overlays before
+            # targeting); the exit is the popup's bottom-center X (spec L67
+            # 点击"X"关闭"丰收礼包"页面) - one Android Back from the claimed
+            # popup left the whole 芭芭农场 container for feed and starved
+            # back(("farm",)), so dismiss() taps the farm_gift circle.
+            s.tap("[立三主]即领取", lambda o:not o.has("[立三主]即领取"),
+                  spend=True, overlay=True)
+            from workflow.recovery import dismiss
+
+            s.obs = dismiss(s, s.obs)
         s.back(("feed",))
         s.complete_row("^去芭芭农场")
 

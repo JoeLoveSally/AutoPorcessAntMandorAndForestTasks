@@ -466,6 +466,62 @@ def test_farm_welcome_card_label_row_never_fires_the_reward_overlay():
     assert "reward" not in obs.overlays
 
 
+def test_farm_gift_popup_is_a_dismissible_overlay_with_close_control():
+    # Device evidence (2026-09-30, run f427d5): the daily fertilize's
+    # 丰收礼包 popup renders a bare circle bottom-center under its CTA;
+    # the flow's Android Back from it left the whole 芭芭农场 container
+    # for feed (spec L67 closes it with the X), so the circle must be
+    # found while the popup is still up - pending state included, since
+    # the claim tap needs the classified overlay to ride through.
+    obs = screen_observation(
+        "farm-gift-pending",
+        ["支付宝·芭芭农场", "丰收礼包待领取", "2027.12.3前可领取肥料礼包",
+         "肥料", "立即领取"],
+        "farm_gift_pending.jpg",
+    )
+
+    assert obs.page == "farm"
+    assert obs.overlays == ["farm_gift"]
+    close = [element for element in obs.elements if element.text == "广告关闭"]
+    assert len(close) == 1
+    assert abs(close[0].point[0] / obs.width - .50) < .03
+    assert abs(close[0].point[1] / obs.height - .726) < .03
+
+
+def test_farm_gift_popup_survives_the_ocr_半_misread_on_the_claimed_state():
+    # Same popup after the claim: OCR flipped the title's 丰 to 半 on
+    # frames it read correctly a beat earlier (0157 against 0155), so the
+    # gate must accept the [半丰] character class or the claimed state
+    # (the only one the flow closes from) never classifies.
+    obs = screen_observation(
+        "farm-gift-claimed",
+        ["支付宝·芭芭农场", "半收礼包已领取", "600肥料已发放",
+         "肥料", "点此逛一逛再赚1000肥料>"],
+        "farm_gift_claimed.jpg",
+    )
+
+    assert obs.page == "farm"
+    assert obs.overlays == ["farm_gift"]
+    close = [element for element in obs.elements if element.text == "广告关闭"]
+    assert len(close) == 1
+    assert abs(close[0].point[1] / obs.height - .726) < .03
+
+
+def test_farm_fertilize_home_is_never_flagged():
+    # The settled fertilize home (施肥 + 主即领肥, run f427d5 frame 0154)
+    # carries no 丰收礼包 title; the scan band there produced no circle
+    # in any of the run's clean frames, so this state stays overlay-free
+    # and the fertilize tap keeps finding its target.
+    obs = screen_observation(
+        "farm-fertilize-home",
+        ["支付宝·芭芭农场", "施肥", "肥料45938", "主即领肥", "明日7点可领"],
+        "farm_fertilize_home.jpg",
+    )
+
+    assert obs.page == "farm"
+    assert obs.overlays == []
+
+
 def test_kitchen_result_modal_classifies_from_the_event_header():
     # Device evidence (2026-09-27, run a520fb): the cook-result modal hides
     # the store button and the claim row reads plain 领食材 (no 今日) while

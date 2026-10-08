@@ -324,6 +324,43 @@ def classify(observation):
                     observation.overlays.append("farm_promo")
                     observation.elements.append(
                         close_circle_element(observation, circle, (x0, y0)))
+    # Device evidence (2026-09-30, run f427d5): the daily fertilize's
+    # 丰收礼包 popup (spec L67: 施肥 -> 立即领肥 -> popup -> 立即领取 ->
+    # 点击"X"关闭) is claimed through its own CTA, but the exit that
+    # follows - one Android Back - closed the whole 芭芭农场 container
+    # onto feed (the drawer's exit, run 5742c4, all over again) and
+    # starved back(("farm",)). The close circle floats bottom-center
+    # under the CTA at (0.50w, 0.726h) r≈56 full-scale in BOTH claim
+    # states (frames 0157/0158 detect identically), and OCR reads the
+    # title's 丰 as 半 mid-animation on the same popup (0157 against
+    # 0155), so the gate is the [半丰]收礼包 title on the farm page - the
+    # same run's 8 clean farm frames carry neither the text nor a circle
+    # in the scan band.
+    if observation.page == "farm" and observation.has(r"[半丰]收礼包") \
+            and observation.image is not None:
+        image = observation.image
+        h, w = image.shape[:2]
+        x0, y0 = int(w * .35), int(h * .66)
+        crop = cv2.cvtColor(image[y0:int(h * .80), x0:int(w * .65)], cv2.COLOR_BGR2GRAY)
+        if crop.size:
+            blurred = cv2.GaussianBlur(crop, (5, 5), 1.2)
+            circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, 1.2, 80,
+                                       param1=100, param2=45,
+                                       minRadius=max(20, int(w * .025)),
+                                       maxRadius=max(40, int(w * .06)))
+            if circles is not None:
+                expected = (crop.shape[1] / 2, crop.shape[0] * .50)
+                circle = min(
+                    circles[0],
+                    key=lambda item: (float(item[0]) - expected[0]) ** 2
+                    + (float(item[1]) - expected[1]) ** 2,
+                )
+                distance = ((float(circle[0]) - expected[0]) ** 2
+                            + (float(circle[1]) - expected[1]) ** 2) ** .5
+                if distance <= w * .07:
+                    observation.overlays.append("farm_gift")
+                    observation.elements.append(
+                        close_circle_element(observation, circle, (x0, y0)))
     return observation
 
 
