@@ -297,6 +297,48 @@ def test_farm_promo_closes_via_its_circle_and_never_back():
     assert close.text == "广告关闭"
 
 
+def test_app_update_prompt_wins_the_close_and_never_back_or_update():
+    # Device evidence (2026-10-08, run 1ed031): the 版本更新 prompt dims
+    # the home band while the banner copy stays exposed, so its frame can
+    # satisfy the home promo scan's gates too - the prompt must win the
+    # close (its dismissal undims the band) and press neither Back (walks
+    # Alipay out) nor 立即更新 (would start the app update).
+    prompt = Observation(
+        "prompt", 0.0, 1440, 3200, "alipay",
+        [Element("版本更新", (564, 1562, 872, 1640), "prompt"),
+         Element("广告关闭", (1123, 1078, 1243, 1198), "prompt")],
+        page="alipay", overlays=["app_update", "home_promo"],
+    )
+    clear = Observation("clear", 1.0, 1440, 3200, "alipay", [], page="alipay")
+
+    class RecordingSession(Session):
+        def __init__(self):
+            super().__init__(SimpleNamespace(), {})
+            self.task = "manor.home.reward_friends"
+            self.tapped = None
+            self._captures = iter((clear,))
+            self.ex = SimpleNamespace(tap=self._tap)
+
+        def _tap(self, _obs, close, predicate, name, _task, **_kwargs):
+            assert predicate(clear)
+            self.tapped = (name, close)
+
+        def observe(self, _reason="observe"):
+            return next(self._captures)
+
+        def back_observation(self, *_args, **_kwargs):
+            raise AssertionError("Back on the Alipay home would exit the app")
+
+    session = RecordingSession()
+
+    result = dismiss(session, prompt)
+
+    assert result is clear
+    name, close = session.tapped
+    assert name == "close-app-update"
+    assert close.text == "广告关闭"
+
+
 def test_furniture_promo_without_its_cta_anchor_fails_closed():
     # The close circle has no OCR text; without the CTA there is nothing
     # to derive its position from, so dismiss must fail visibly instead

@@ -38,21 +38,25 @@ def dismiss(session, observation=None):
                 recover=False,
             )
         elif any(kind in obs.overlays
-                 for kind in ("manor_ad", "forest_campaign", "home_promo",
-                              "farm_promo", "farm_gift")):
+                 for kind in ("manor_ad", "forest_campaign", "app_update",
+                              "home_promo", "farm_promo", "farm_gift")):
             # Homepage ads retain the manor page underneath and forest campaign
             # modals retain the forest home, so the close circle created by the
             # current observation's vision rule cannot become stale across
             # stacked overlays. The Alipay-home coupon card (2026-09-25,
             # run 41640d) joins them: Back on the home would exit the app.
-            # The farm promo card (2026-09-26, run 7d8d95) closes the same
-            # way: Back would abandon the farm whose auto-jump drawer has
-            # no static entry to return to. The fertilize's 丰收礼包 popup
-            # (2026-09-30, run f427d5) too: Back exited the whole
-            # 芭芭农场 container onto feed instead of closing the popup.
+            # The 版本更新 prompt (2026-10-08, run 1ed031) closes the same
+            # way through its title-anchored X - and it sorts before the
+            # home promo scan because the prompt itself creates the dim
+            # band that scan's gate reads. The farm promo card (2026-09-26,
+            # run 7d8d95) closes through its circle: Back would abandon the
+            # farm whose auto-jump drawer has no static entry to return to.
+            # The fertilize's 丰收礼包 popup (2026-09-30, run f427d5) too:
+            # Back exited the whole 芭芭农场 container onto feed instead of
+            # closing the popup.
             kind = next(kind for kind in ("manor_ad", "forest_campaign",
-                                          "home_promo", "farm_promo",
-                                          "farm_gift")
+                                          "app_update", "home_promo",
+                                          "farm_promo", "farm_gift")
                         if kind in obs.overlays)
             close = next((e for e in obs.elements if e.text == "广告关闭"), None)
             if close is None:

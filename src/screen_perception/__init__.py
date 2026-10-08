@@ -238,6 +238,33 @@ def classify(observation):
                     if distance <= w * .07:
                         observation.overlays.append("forest_campaign")
                         observation.elements.append(close_circle_element(observation, circle, (x0, y0)))
+    # Device evidence (2026-10-08, run 1ed031): a native 版本更新 prompt
+    # (支付宝最新尝鲜版) covers the alipay home center on the first launch
+    # after a week idle - its card clips the quick-icon labels to 庄园/
+    # 芭芭/市民 (the 蚂蚁 halves sit behind the card), the page still
+    # classifies alipay from the exposed header, and ^蚂蚁庄园$ found 0
+    # across three frames. The card dims the backdrop (left band 82.5
+    # against a clean home's 172) so the home promo scan's gates would
+    # pass too - only its circle hunt misses - and this rule therefore
+    # runs first: dismissing the prompt undims the band that scan keys
+    # on. The prompt's own top-right X carries no ring (HoughCircles
+    # returns only the card's corner arcs), so gate on the update copy
+    # and anchor the close on the OCR'd title: 版本更新 held
+    # [564,1562,872,1640] with the X centered at (1183,1138) - title
+    # center + (+465,-463), frame 0003. 立即更新 would start the app
+    # update and Back walks Alipay out, so the X is the only safe
+    # control; the overlay-removal postcondition guards the offset.
+    if observation.page == "alipay" and observation.has("版本更新") \
+            and observation.has("支付宝最新尝鲜版"):
+        titles = observation.find("版本更新")
+        if len(titles) == 1:
+            title = titles[0]
+            cx = int((title.bounds[0] + title.bounds[2]) / 2 + 465)
+            cy = int((title.bounds[1] + title.bounds[3]) / 2 - 463)
+            observation.overlays.append("app_update")
+            observation.elements.append(Element(
+                "广告关闭", (cx - 60, cy - 60, cx + 60, cy + 60),
+                observation.id, "vision.ocr_anchor", 0.9))
     # Alipay-home interstitials (real-device evidence 2026-09-25, run
     # 41640d): the 广州生活卡 / 支付打车外卖组合券包 coupon card covered the
     # middle of the常用 icon row - 蚂蚁森林 and 游戏中心 sit behind it -

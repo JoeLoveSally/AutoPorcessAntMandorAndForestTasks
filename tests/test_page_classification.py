@@ -522,6 +522,47 @@ def test_farm_fertilize_home_is_never_flagged():
     assert obs.overlays == []
 
 
+def test_alipay_update_prompt_is_dismissible_from_its_title_anchor():
+    # Device evidence (2026-10-08, run 1ed031): the native 版本更新 prompt
+    # clipped the home quick icons to 庄园/芭芭/市民 (蚂蚁 sat behind the
+    # card) and ^蚂蚁庄园$ found 0 while the page still read alipay. The
+    # card dims the backdrop, so the home promo scan's text and dim gates
+    # pass on this frame too - only its circle hunt misses - and the
+    # prompt rule must run first with its own title-anchored control.
+    obs = screen_observation(
+        "alipay-update-prompt",
+        ["广州√", "医保", "搜索", "扫一扫", "收付款", "出行", "卡包",
+         "广州生活卡", "领12张红包", "版本更新",
+         "支付宝最新尝鲜版来啦，启动更快，", "使用更流畅。马上更新吧!",
+         "立即更新", "市民", "庄园", "芭芭", "我的"],
+        "alipay_update_prompt.jpg",
+    )
+
+    assert obs.page == "alipay"
+    assert obs.overlays == ["app_update"]
+    close = [element for element in obs.elements if element.text == "广告关闭"]
+    assert len(close) == 1
+    title = obs.find("版本更新")[0]
+    cx = int((title.bounds[0] + title.bounds[2]) / 2 + 465)
+    cy = int((title.bounds[1] + title.bounds[3]) / 2 - 463)
+    assert close[0].point == (cx, cy)
+
+
+def test_clean_alipay_home_is_never_flagged_as_update_prompt():
+    # The launch frame before the prompt pops reads the full 蚂蚁庄园
+    # grid with its banner copy; without the update copy there is nothing
+    # to anchor a close on, so the home must stay overlay-free.
+    obs = screen_observation(
+        "alipay-home-clean",
+        ["广州√", "支付宝会员", "搜索", "扫一扫", "收付款", "出行", "卡包",
+         "广州生活卡最高领", "蚂蚁庄园", "芭芭农场", "蚂蚁森林", "更多", "我的"],
+        "alipay_home_clean.jpg",
+    )
+
+    assert obs.page == "alipay"
+    assert obs.overlays == []
+
+
 def test_kitchen_result_modal_classifies_from_the_event_header():
     # Device evidence (2026-09-27, run a520fb): the cook-result modal hides
     # the store button and the claim row reads plain 领食材 (no 今日) while
