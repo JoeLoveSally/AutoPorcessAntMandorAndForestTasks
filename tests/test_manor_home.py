@@ -3,7 +3,7 @@
 import unittest
 from types import SimpleNamespace
 
-from domain_data import Element, Observation
+from domain_data import AutomationError, Element, Observation
 from workflow.manor.home import ManorHome
 
 
@@ -57,6 +57,27 @@ class FakeSession:
         self.back_calls.append(pages)
 
 
+class CapturingSession(FakeSession):
+    """Exposes the postcondition the reward loop handed to tap_element."""
+
+    def tap_element(self, obs, element, predicate, **kwargs):
+        self.predicate = predicate
+        return self.after
+
+
+class StaleRewardSession(FakeSession):
+    """The pixel guard refuses the reward tap, so nothing reaches the phone."""
+
+    verify_reasons = ()
+
+    def tap_element(self, obs, element, predicate, **kwargs):
+        raise AutomationError("Target changed since observation", "STALE")
+
+    def observe(self, reason):
+        self.verify_reasons = self.verify_reasons + (reason,)
+        return self.after
+
+
 class ManorHomeTests(unittest.TestCase):
     def test_absent_reward_is_skipped(self):
         session = FakeSession(observation("1", []), observation("2", []))
@@ -88,16 +109,59 @@ class ManorHomeTests(unittest.TestCase):
         still = frame("2", card + banner)
         gone = frame("3", banner)
 
-        class CapturingSession(FakeSession):
-            def tap_element(self, obs, element, predicate, **kwargs):
-                self.predicate = predicate
-                return self.after
-
         session = CapturingSession(before, gone)
         ManorHome(session).reward_friends()
         self.assertFalse(session.predicate(still))
         self.assertTrue(session.predicate(gone))
         self.assertEqual(session.done_args, [{"skipped": False}])
+
+    def test_reward_postcondition_ignores_stamp_jitter_on_the_same_card(self):
+        # Device evidence (2026-10-09, run 64f66a): the 小号's third reward
+        # left the SAME 健桥 card mid-animation while OCR re-read its stamp
+        # 健桥/天前 as 健桥1天前 and shifted the row ~30px - a raw text
+        # comparison called the unchanged card a new one, the loop re-tapped
+        # it, and the pixel guard's STALE killed the run. Only the CJK runs
+        # count, so the jittered stamp still compares equal to the original
+        # while a different friend's name still changes the row.
+        card = [("健桥/天前", (257, 2414, 419, 2453)),
+                ("帮你喂食", (260, 2461, 424, 2506)),
+                ("打赏", (491, 2470, 564, 2514))]
+        jitter = [("健桥1天前", (228, 2416, 390, 2454)),
+                  ("帮你喂食", (231, 2461, 393, 2506)),
+                  ("打赏", (461, 2472, 535, 2512))]
+        other = [("妙娟/天前", (257, 2414, 419, 2453)),
+                 ("帮你喂食", (260, 2461, 424, 2506)),
+                 ("打赏", (491, 2470, 564, 2514))]
+
+        session = CapturingSession(frame("1", card), frame("2", []))
+        ManorHome(session).reward_friends()
+        self.assertFalse(session.predicate(frame("jitter", jitter)))
+        self.assertTrue(session.predicate(frame("other", other)))
+
+    def test_stale_reward_tap_is_verified_against_the_fresh_card(self):
+        # Device evidence (2026-10-09, run 64f66a): the pixel guard refused
+        # the tap (nothing was sent) while the card was mid-animation. The
+        # design forbids repeating a submission blind, so the loop must
+        # verify the card on a fresh frame - consumed here means the reward
+        # landed and the task is SUCCESS, never a failure.
+        card = [("健桥/天前", (257, 2414, 419, 2453)),
+                ("帮你喂食", (260, 2461, 424, 2506)),
+                ("打赏", (491, 2470, 564, 2514))]
+        session = StaleRewardSession(frame("1", card), frame("2", []))
+        ManorHome(session).reward_friends()
+        self.assertIn("reward-friend-verify", session.verify_reasons)
+        self.assertEqual(session.done_args, [{"skipped": False}])
+
+    def test_stale_reward_tap_with_the_card_still_there_still_fails(self):
+        # A refused tap whose card is still on screen proves nothing landed;
+        # the loop must fail closed instead of reporting the reward given.
+        card = [("健桥/天前", (257, 2414, 419, 2453)),
+                ("帮你喂食", (260, 2461, 424, 2506)),
+                ("打赏", (491, 2470, 564, 2514))]
+        session = StaleRewardSession(frame("1", card), frame("2", card))
+        with self.assertRaises(AutomationError):
+            ManorHome(session).reward_friends()
+        self.assertEqual(session.done_args, [])
 
     def test_diary_already_done_does_not_submit_again(self):
         entry = observation("0", ["小鸡日记", "领饲料"], page="manor")

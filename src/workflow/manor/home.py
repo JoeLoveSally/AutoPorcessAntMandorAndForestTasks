@@ -16,6 +16,26 @@ REWARD_REGION = (0.0, 0.55, 0.55, 0.9)
 # lingering card and died on the pixel guard's STALE (the card vanished
 # mid-capture). Compare the reward row itself; detection stays wide.
 REWARD_CARD = (0.0, 0.70, 0.55, 0.84)
+
+
+def reward_row(obs):
+    """Identity of the reward-card row, tolerant of the app's re-render jitter.
+
+    Device evidence (2026-10-09, run 64f66a): the 小号 carried three stacked
+    rewards; after the third tap the SAME 健桥 card was still mid-animation
+    in the after frame, but OCR re-read its stamp 健桥/天前 as 健桥1天前 and
+    shifted the whole row ~30px. The raw text tuple therefore differed, the
+    postcondition accepted the stale card, and the loop re-tapped it into the
+    pixel guard's STALE. Keeping only the CJK runs drops the unstable stamp
+    digits and separators, so the same card compares equal while a different
+    friend's name still changes the row.
+    """
+    return frozenset(
+        "".join(ch for ch in element.text if "\u4e00" <= ch <= "\u9fff")
+        for element in obs.find(".", REWARD_CARD)
+    ) - {""}
+
+
 # The chicken-out sign has two observed boards: the roaming variant
 # (小鸡外出探险了 with a 马上去找TA CTA, run 0aa57b on 09-20) and the
 # employed variant (a bare 小鸡出去工作啦 board with no CTA, run 6b3fa4
@@ -81,15 +101,29 @@ class ManorHome:
                     return
                 obs = confirmation
                 continue
-            before = tuple(e.text for e in obs.find(".", REWARD_CARD))
-            obs = s.tap_element(
-                obs, matches[0],
-                lambda after, before=before: after.page == "manor" and not after.overlays and (
-                    not after.has("^打赏$", REWARD_REGION)
-                    or tuple(e.text for e in after.find(".", REWARD_CARD)) != before
-                ),
-                name="reward-friend", spend=True,
-            )
+            before = reward_row(obs)
+            try:
+                obs = s.tap_element(
+                    obs, matches[0],
+                    lambda after, before=before: after.page == "manor" and not after.overlays and (
+                        not after.has("^打赏$", REWARD_REGION)
+                        or reward_row(after) != before
+                    ),
+                    name="reward-friend", spend=True,
+                )
+            except AutomationError as exc:
+                if exc.code != "STALE":
+                    raise
+                # Device evidence (2026-10-09, run 64f66a): the pixel guard
+                # refuses a target that moved, so nothing was sent and the
+                # result is genuinely unclear - the design forbids repeating
+                # a submission blind. Verify the card on a fresh frame: gone
+                # or replaced means the reward landed and the loop continues;
+                # an unchanged card still fails closed.
+                obs = s.observe("reward-friend-verify")
+                if (obs.page != "manor" or obs.overlays
+                        or (obs.has("^打赏$", REWARD_REGION) and reward_row(obs) == before)):
+                    raise
             rewards_given += 1
         raise AutomationError("Reward loop ended without verifying button disappearance", "TIMEOUT")
 
