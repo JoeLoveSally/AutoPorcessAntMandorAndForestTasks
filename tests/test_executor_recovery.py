@@ -338,6 +338,51 @@ def test_costume_promo_closes_via_its_circle_and_never_back():
     assert close.text == "广告关闭"
 
 
+def test_achievement_promo_closes_via_its_circle_and_never_back():
+    # Device evidence (2026-10-09, run d78458): the 小号's donation unlocked
+    # 初心守护者 and the full-screen 恭喜解锁成就 modal dimmed the donate pages
+    # into UNKNOWN (left band 53 against a clean page's ~170), so no page rule
+    # matched and ensure's Back wait starved on the frame (Postcondition
+    # failed: return; page=UNKNOWN across eight frames). The modal is
+    # page-independent, so its close circle cannot be gated on a page identity
+    # - same whitelist semantics as the reward dismissal.
+    promo = Observation(
+        "promo", 0.0, 1440, 3200, "alipay",
+        [Element("恭喜解锁成就", (409, 1156, 1031, 1272), "promo"),
+         Element("广告关闭", (673, 2607, 767, 2715), "promo")],
+        page="UNKNOWN", overlays=["achievement_promo"],
+    )
+    clear = Observation("clear", 1.0, 1440, 3200, "alipay", [], page="donate")
+
+    class RecordingSession(Session):
+        def __init__(self):
+            super().__init__(SimpleNamespace(), {})
+            self.task = "manor.family.donate_egg"
+            self.tapped = None
+            self._captures = iter((clear,))
+            self.ex = SimpleNamespace(tap=self._tap)
+
+        def _tap(self, _obs, close, predicate, name, _task, **kwargs):
+            assert predicate(clear)
+            assert kwargs.get("allow_unknown") is True
+            self.tapped = (name, close)
+
+        def observe(self, _reason="observe"):
+            return next(self._captures)
+
+        def back_observation(self, *_args, **_kwargs):
+            raise AssertionError("Back would only re-dim the same page")
+
+    session = RecordingSession()
+
+    result = dismiss(session, promo)
+
+    assert result is clear
+    name, close = session.tapped
+    assert name == "close-achievement-promo"
+    assert close.text == "广告关闭"
+
+
 def test_app_update_prompt_wins_the_close_and_never_back_or_update():
     # Device evidence (2026-10-08, run 1ed031): the 版本更新 prompt dims
     # the home band while the banner copy stays exposed, so its frame can

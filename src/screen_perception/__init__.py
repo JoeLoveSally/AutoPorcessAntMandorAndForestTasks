@@ -481,6 +481,40 @@ def classify(observation):
                         observation.overlays.append("costume_promo")
                         observation.elements.append(
                             close_circle_element(observation, circle, (x0, y0)))
+    # Device evidence (2026-10-09, run d78458): the 小号 unlocked the
+    # 初心守护者 achievement right after its donation and the full-screen
+    # 恭喜解锁成就 modal dimmed the donate pages into UNKNOWN (left band 53
+    # against a clean page's ~170), so no page rule matched, nothing
+    # classified as an overlay, and ensure's Back wait starved on the frame
+    # (Postcondition failed: return; page=UNKNOWN across eight frames). The
+    # modal is page-independent - it can land over any mini-app page - and
+    # carries a centered close circle at (720,2661) r54, the same
+    # bottom-center slot the other promo scans use. Its own title gates the
+    # scan, so the donation copy can never launch the circle hunt.
+    if observation.has("恭喜解锁成就") and observation.image is not None:
+        image = observation.image
+        h, w = image.shape[:2]
+        band = cv2.cvtColor(image[int(h * .62):int(h * .90), 0:int(w * .10)],
+                            cv2.COLOR_BGR2GRAY)
+        if band.size and cv2.mean(band)[0] < 140:
+            x0, y0 = int(w * .35), int(h * .72)
+            crop = cv2.cvtColor(image[y0:int(h * .93), x0:int(w * .65)],
+                                cv2.COLOR_BGR2GRAY)
+            if crop.size:
+                blurred = cv2.GaussianBlur(crop, (5, 5), 1.2)
+                circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, 1.2, 80,
+                                           param1=100, param2=45,
+                                           minRadius=max(20, int(w * .025)),
+                                           maxRadius=max(40, int(w * .06)))
+                if circles is not None:
+                    center = crop.shape[1] / 2
+                    centered = [item for item in circles[0]
+                                if abs(float(item[0]) - center) <= w * .07]
+                    if centered:
+                        circle = max(centered, key=lambda item: float(item[1]))
+                        observation.overlays.append("achievement_promo")
+                        observation.elements.append(
+                            close_circle_element(observation, circle, (x0, y0)))
     return observation
 
 

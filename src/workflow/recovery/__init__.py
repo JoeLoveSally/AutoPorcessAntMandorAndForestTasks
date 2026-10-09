@@ -76,6 +76,26 @@ def dismiss(session, observation=None):
                 allow_overlay=True,
                 recover=False,
             )
+        elif "achievement_promo" in obs.overlays:
+            # Device evidence (2026-10-09, run d78458): the 恭喜解锁成就 modal
+            # dims whatever page it landed on into UNKNOWN, so the close
+            # circle cannot be gated on a page identity - same whitelist
+            # semantics as the reward dismissal below. Its own title plus the
+            # dim band gated the vision scan, and the overlay-removal
+            # postcondition still guards the press.
+            close = next((e for e in obs.elements if e.text == "广告关闭"), None)
+            if close is None:
+                raise AutomationError("achievement_promo has no verified close control", "OVERLAY")
+            session.ex.tap(
+                obs,
+                close,
+                lambda o, before=obs: removed_or_replaced("achievement_promo", before, o),
+                "close-achievement-promo",
+                session.task,
+                allow_overlay=True,
+                allow_unknown=True,
+                recover=False,
+            )
         elif "reward" in obs.overlays and obs.has("开心收下|我知道啦"):
             target = obs.one("开心收下|我知道啦")
             session.tap_element(

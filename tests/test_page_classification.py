@@ -568,6 +568,40 @@ def test_costume_copy_on_an_undimmed_manor_home_never_fires_the_scan():
     assert "costume_promo" not in obs.overlays
 
 
+def test_achievement_unlock_modal_is_a_dismissible_overlay_with_close_control():
+    # Device evidence (2026-10-09, run d78458): the 小号's donation unlocked
+    # 初心守护者 and the full-screen 恭喜解锁成就 modal dimmed the donate pages
+    # into UNKNOWN (left band 53 against a clean page's ~170), so no page rule
+    # matched and ensure's Back wait starved on the frame. The modal is
+    # page-independent, so its title plus the dim band gate a scan for the
+    # bottom-center close circle the OCR cannot read - it must land at .83h.
+    obs = screen_observation(
+        "achievement-unlock",
+        ["15:52", "中", "恭喜解锁成就", "初心守护者", "去领奖"],
+        "achievement_unlock.jpg",
+    )
+
+    assert obs.page == "UNKNOWN"
+    assert obs.overlays == ["achievement_promo"]
+    close = [element for element in obs.elements if element.text == "广告关闭"]
+    assert len(close) == 1
+    assert abs(close[0].point[0] / obs.width - .50) < .03
+    assert abs(close[0].point[1] / obs.height - .83) < .03
+
+
+def test_achievement_copy_on_an_undimmed_page_never_fires_the_scan():
+    # The unlock banner copy could survive as a settled state after the close;
+    # the dim band (53 modal against a clean page's ~170) is the gate that
+    # keeps a bright frame from ever launching the circle scan.
+    obs = screen_observation(
+        "achievement-clean",
+        ["15:52", "恭喜解锁成就", "初心守护者", "去领奖"],
+        "manor_home_clean.jpg",
+    )
+
+    assert "achievement_promo" not in obs.overlays
+
+
 def test_farm_fertilize_home_is_never_flagged():
     # The settled fertilize home (施肥 + 主即领肥, run f427d5 frame 0154)
     # carries no 丰收礼包 title; the scan band there produced no circle
