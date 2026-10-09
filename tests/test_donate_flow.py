@@ -113,6 +113,12 @@ def test_complete_row_accepts_the_done_title_when_ocr_missed_the_side_button():
 
     session.complete_row("每日捐蛋|捐蛋做好事", page="family_tasks")
 
+    # The disabled pill OCR'd as 朋天再来 (明/朋 confusion, run eaf7d5) is
+    # the same done marker and must not fail a verified submission.
+    misread = Element("朋天再来", (1000, 3132, 1300, 3190), "done")
+    session.row = lambda *_args, **_kwargs: (obs, anchor, misread)
+    session.complete_row("每日捐蛋|捐蛋做好事", page="family_tasks")
+
     # A pending row still fails closed on its side button.
     pending = Element("去捐蛋", (1000, 3132, 1300, 3190), "done")
     session.row = lambda *_args, **_kwargs: (obs, anchor, pending)

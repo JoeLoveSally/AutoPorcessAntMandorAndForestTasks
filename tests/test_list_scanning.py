@@ -167,6 +167,26 @@ def test_signed_state_still_resolves_as_the_row_button():
     assert button.text == "已签到"
 
 
+def test_come_back_tomorrow_pill_resolves_despite_the_ming_peng_misread():
+    # Device evidence (2026-10-09, run eaf7d5): the 小号's family meal row
+    # OCR'd its disabled pill as 朋天再来 while the donate row's identical
+    # pill read 明天再来 in the SAME frame (明 and 朋 share the 月 radical).
+    # The label then matched no TASK_BUTTON entry, row() fell back to the
+    # synthetic button column, and the meal task died on "Task completion
+    # not verified" - the variant must resolve as the real row button.
+    page = Observation("1", 0.0, 1440, 3200, "alipay", [
+        Element("请家人吃一顿美食(1/3)", (290, 2396, 875, 2459), "1"),
+        Element("朋天再来", (1116, 2480, 1313, 2535), "1"),
+    ], page="family_tasks")
+    session = ScanningSession([page])
+
+    _, title, button = session.row(r"请家人吃一顿美食.*[（(]\d+/\d+[）)]$",
+                                   page="family_tasks")
+
+    assert title.text == "请家人吃一顿美食(1/3)"
+    assert button.text == "朋天再来"
+
+
 def test_row_reobserves_when_the_first_frame_lacks_the_row_button(monkeypatch):
     # Device evidence (2026-09-23): the first frame after the lottery side
     # switch had the market row's title drawn but not its 去逛逛 button -

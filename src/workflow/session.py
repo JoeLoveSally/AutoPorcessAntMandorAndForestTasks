@@ -10,7 +10,13 @@ from screen_perception.query import ElementQuery, find_elements
 # lottery's 每日签到 card exposes an exact "签到" button (its signed state
 # "已签到" must still resolve as the row button so re-visits skip cleanly).
 # Anchored so the card title 每日签到 itself never matches the button query.
-TASK_BUTTON = ("去完成|去答题|去逛逛|去捐蛋|去请客|去喂食|领取|明天再来|"
+# Device evidence (2026-10-09, run eaf7d5): the family list's disabled
+# "come back tomorrow" pill OCR'd as 朋天再来 on the meal row while the
+# identical pill on the donate row in the SAME frame read 明天再来 - 明 and
+# 朋 share the 月 radical and the stylised font flips the left one. Without
+# the variant the pill matched no label, row() fell back to the button
+# column, and the task failed as unverified. Read both spellings.
+TASK_BUTTON = ("去完成|去答题|去逛逛|去捐蛋|去请客|去喂食|领取|[明朋]天再来|"
                "已完成|已领取|点后|^签到$|^已签到$")
 
 
@@ -409,7 +415,7 @@ class Session:
         # 每日捐蛋做好事(1/1) and no side button; row() legitimately falls
         # back to that title as its button (its own (1/1) check guarantees
         # the marker), so the counter must count as completion evidence.
-        if not re.search("领取|明天再来|已完成|已领取|点后|[（(]1/1[）)]", button.text):
+        if not re.search("领取|[明朋]天再来|已完成|已领取|点后|[（(]1/1[）)]", button.text):
             raise AutomationError(f"Task completion not verified: {title}")
         if claim and button.text == "领取":
             before = button

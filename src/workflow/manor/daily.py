@@ -51,7 +51,7 @@ class Manor:
     def family_donate(self):
         s = self.s
         obs, title, button = s.row("每日捐蛋|捐蛋做好事", page="family_tasks")
-        if "明天再来" in button.text or re.search(r"[（(]1/1[）)]", title.text):
+        if re.search("[明朋]天再来", button.text) or re.search(r"[（(]1/1[）)]", title.text):
             s.done(obs, already=True)
             return
         if s.ex.store.unresolved(s.task):
@@ -82,7 +82,7 @@ class Manor:
         title_pattern = (r"^请家人吃一顿美食.*[（(]\d+/\d+[）)]$" if kind == "meal"
                          else r"^帮喂家人小鸡.*[（(]\d+/\d+[）)]$")
         obs, title, button = s.row(title_pattern, page="family_tasks")
-        if re.search("明天再来|点后|已完成", button.text) or re.search(r"[（(]1/1[）)]", title.text):
+        if re.search("[明朋]天再来|点后|已完成", button.text) or re.search(r"[（(]1/1[）)]", title.text):
             s.done(obs, already=True)
             return
         if obs.has("暂无小鸡"):

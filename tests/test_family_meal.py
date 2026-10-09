@@ -103,3 +103,23 @@ def test_feed_skips_when_no_family_chicken_is_feedable():
     assert session.done_args == [{"skipped": True}]
     assert session.tap_element_calls == []
     assert session.tap_calls == []
+
+
+def test_meal_treats_the_misread_come_back_pill_as_done():
+    # Device evidence (2026-10-09, run eaf7d5): the 小号's family list rendered
+    # the disabled pill as 朋天再来 while the donate row's identical pill read
+    # 明天再来 in the SAME frame (明 and 朋 share the 月 radical). The done
+    # check missed it, the loop tried to act on the dead label, and the run
+    # died on "Task completion not verified: ^请家人吃一顿美食...". The
+    # variant must resolve as already-done instead of a failed submission.
+    session = FakeSession(
+        row_texts=("请家人吃一顿美食(1/3)", "朋天再来"),
+        title="请家人吃一顿美食(1/3)",
+        button="朋天再来",
+    )
+
+    Manor(session).family_action("meal")
+
+    assert session.done_args == [{"already": True}]
+    assert session.tap_element_calls == []
+    assert session.tap_calls == []
