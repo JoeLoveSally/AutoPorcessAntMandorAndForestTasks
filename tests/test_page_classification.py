@@ -180,6 +180,30 @@ def test_home_coupon_modal_tall_template_keeps_its_low_close_control():
     assert abs(close[0].point[1] / obs.height - .85) < .03
 
 
+def test_home_coupon_modal_restores_the_page_when_the_dim_hides_the_home_signature():
+    # Device evidence (2026-10-09, run 75b3a0): the taller 领12张 card dims
+    # the quick-icon row hard enough that OCR dropped 扫一扫 and clipped the
+    # grid label 市民中心 to 市民中, so no alipay group-one marker survived
+    # and the frame stayed UNKNOWN - the promo never classified as an
+    # overlay, and forest.self's entry starved on ensure's Back wait
+    # (Postcondition failed: return; page=UNKNOWN). The interstitial only
+    # ever sits on the Alipay home, so a verified close circle restores the
+    # page identity and the overlay then dismisses normally.
+    obs = screen_observation(
+        "home-promo-1009",
+        ["收付款", "出行", "广州生活卡", "领12张", "可爆涨外卖红包", "立即领取",
+         "市民中", "蚁庄园", "芭芭农", "常用", "推荐", "消息", "我的"],
+        "home_promo_1009.jpg",
+    )
+
+    assert obs.page == "alipay"
+    assert obs.overlays == ["home_promo"]
+    close = [element for element in obs.elements if element.text == "广告关闭"]
+    assert len(close) == 1
+    assert abs(close[0].point[0] / obs.width - .5) < .03
+    assert abs(close[0].point[1] / obs.height - .855) < .03
+
+
 def test_clean_home_with_the_banner_copy_is_not_reflagged_after_dismissal():
     # Real-device evidence (2026-09-29, run 4374cb): once the modal closed,
     # the home's own 广州生活卡限时放送 banner kept satisfying the text gate,

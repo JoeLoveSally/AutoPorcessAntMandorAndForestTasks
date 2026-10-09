@@ -316,7 +316,8 @@ def classify(observation):
     # the notification toast's own close is off-center. The card text
     # gates the scan so the round icons of a clean home can never
     # trigger it.
-    if observation.page == "alipay" and observation.has("广州生活卡|组合券包") \
+    if observation.page in ("alipay", "UNKNOWN") \
+            and observation.has("广州生活卡|组合券包") \
             and observation.image is not None:
         image = observation.image
         h, w = image.shape[:2]
@@ -346,6 +347,20 @@ def classify(observation):
                                 if abs(float(item[0]) - center) <= w * .07]
                     if centered:
                         circle = max(centered, key=lambda item: float(item[1]))
+                        # Device evidence (2026-10-09, run 75b3a0): this
+                        # period's taller 领12张 card dims the quick-icon row
+                        # so hard that OCR dropped 扫一扫 entirely and clipped
+                        # the home grid label 市民中心 to 市民中, so the alipay
+                        # rule's group one matched nothing and the frame
+                        # stayed UNKNOWN - the promo never classified as an
+                        # overlay and forest.self's entry starved on ensure's
+                        # Back wait (Postcondition failed: return; page=UNKNOWN
+                        # across seven frames). The interstitial only ever
+                        # sits on the Alipay home, so a verified close circle
+                        # (band 66 vs the clean home's ~220, centered r56 at
+                        # (721,2736)) restores the page identity the dim
+                        # destroyed and the overlay then dismisses normally.
+                        observation.page = "alipay"
                         observation.overlays.append("home_promo")
                         observation.elements.append(
                             close_circle_element(observation, circle, (x0, y0)))
