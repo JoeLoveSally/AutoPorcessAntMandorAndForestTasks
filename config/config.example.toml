@@ -1,4 +1,10 @@
 serial = "10AD4419NX0029Z"
+# Namespaces this account's daily progress in runtime/task_state.db. Two
+# Alipay accounts on one phone share the device serial, so each account
+# needs its own value - otherwise the second run reads the first one's
+# completed records and skips tasks. The run lock still covers the whole
+# device, so the two accounts can never drive the phone at the same time.
+account = ""
 adb = "adb"
 package = "com.eg.android.AlipayGphone"
 # Used to distinguish your 520g watering record from other members' records.

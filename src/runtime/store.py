@@ -11,9 +11,19 @@ from domain_data import AutomationError
 
 
 class Store:
-    def __init__(self, root, serial, run):
+    def __init__(self, root, serial, run, account=""):
         root.mkdir(parents=True, exist_ok=True)
-        self.serial, self.run = serial, run
+        # Progress is per account as well as per device. Two Alipay accounts
+        # share one phone and therefore one serial, so the raw serial would
+        # let the second account read the first's records - and the diary's
+        # verified_status guard, the unresolved-submission guard and the
+        # kitchen reconciliation all decide from this key, so the second
+        # account would skip a task the first one finished. The run lock
+        # stays on the device serial: only one process may drive the phone
+        # at a time, whichever account it is working.
+        self.device_serial = serial
+        self.serial = f"{serial}#{account}" if account else serial
+        self.run = run
         self.day = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
         self.lock = (root / (hashlib.sha256(serial.encode()).hexdigest()[:16] + ".lock")).open("a")
         try:

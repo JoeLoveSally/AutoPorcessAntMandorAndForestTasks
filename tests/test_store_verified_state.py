@@ -66,3 +66,37 @@ def test_unresolved_submission_names_the_stuck_action(tmp_path):
                          {"ad": 1})
     finally:
         store.close()
+
+
+def test_second_account_does_not_inherit_the_first_accounts_records(tmp_path):
+    # Two Alipay accounts share one phone and therefore one serial. The raw
+    # serial would let the second account read the first's records, and the
+    # diary's verified_status guard, the unresolved-submission guard and the
+    # kitchen reconciliation all decide from this key - so the second account
+    # would skip a task the first one finished.
+    first = Store(tmp_path, "serial", "run-1", account="main")
+    try:
+        first.task("manor.home.diary", "SUCCESS", {"observation": "obs-1"})
+        assert first.verified_status("manor.home.diary") == "SUCCESS"
+    finally:
+        first.close()
+
+    second = Store(tmp_path, "serial", "run-2", account="xiao")
+    try:
+        assert second.status("manor.home.diary") is None
+        assert second.verified_status("manor.home.diary") is None
+    finally:
+        second.close()
+
+
+def test_two_accounts_still_cannot_drive_the_same_phone_at_once(tmp_path):
+    # The lock covers the device, not the account: whichever account a run
+    # is working, it must own the phone exclusively.
+    held = Store(tmp_path, "serial", "run-1", account="main")
+    try:
+        with pytest.raises(AutomationError,
+                           match="Another process controls this device"):
+            Store(tmp_path, "serial", "run-2", account="xiao")
+    finally:
+        held.close()
+

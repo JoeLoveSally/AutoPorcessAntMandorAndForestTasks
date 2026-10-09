@@ -47,7 +47,7 @@ def main():
         for executable in (config.get("adb", "adb"), config.get("ffmpeg", "ffmpeg")):
             if shutil.which(executable) is None:
                 raise AutomationError(f"Required executable not found: {executable}", "CONFIG")
-        store = Store(root / "runtime", serial, run)
+        store = Store(root / "runtime", serial, run, config.get("account", ""))
         device = Device(serial, config.get("adb", "adb"))
         if args.command == "doctor":
             info = device.info()
