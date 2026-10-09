@@ -10,6 +10,7 @@ __pycache__/
 # Local tools
 /.agents/
 /.codex/
+/.workbuddy-ai/
 
 # Secrets and local configuration
 .env
