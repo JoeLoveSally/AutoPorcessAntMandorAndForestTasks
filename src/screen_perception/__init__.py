@@ -422,6 +422,50 @@ def classify(observation):
                     observation.overlays.append("farm_gift")
                     observation.elements.append(
                         close_circle_element(observation, circle, (x0, y0)))
+    # Device evidence (2026-10-09, run e81885): the 秋日美满 主题装扮来拉
+    # costume campaign opens as a full-screen modal over the manor home and
+    # rode EVERY frame of that run (from the first entry at 13:49) while the
+    # page kept classifying manor - the scrim dims the backdrop (left band
+    # gray 34 against a clean home's 172) yet the bottom nav stays readable
+    # under it, and none of the campaign copy sat in any rule, so overlays
+    # stayed empty and donate_egg's 家庭 tap at (627,3037) landed on the
+    # modal's full-screen touch layer: eight postcondition refreshes all
+    # read manor with zero transition frames (the tap was swallowed). The
+    # close circle carries no OCR text - Hough finds it at (720,2450) r47,
+    # dead-centered, in the same .62-.86h band the farm promo scan uses
+    # (82px from the band center, inside the .07w tolerance). The campaign
+    # copy is modal-exclusive and the dim band gates it the way the home
+    # promo scan does, so a bright home whose scene might echo the campaign
+    # name can never launch the circle scan.
+    if observation.page == "manor" and observation.image is not None \
+            and observation.has("秋日美满|主题装扮来[拉啦]|去抽装扮"):
+        image = observation.image
+        h, w = image.shape[:2]
+        band = cv2.cvtColor(image[int(h * .62):int(h * .90), 0:int(w * .10)],
+                            cv2.COLOR_BGR2GRAY)
+        if band.size and cv2.mean(band)[0] < 140:
+            x0, y0 = int(w * .35), int(h * .62)
+            crop = cv2.cvtColor(image[y0:int(h * .86), x0:int(w * .65)],
+                                cv2.COLOR_BGR2GRAY)
+            if crop.size:
+                blurred = cv2.GaussianBlur(crop, (5, 5), 1.2)
+                circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, 1.2, 80,
+                                           param1=100, param2=45,
+                                           minRadius=max(20, int(w * .025)),
+                                           maxRadius=max(40, int(w * .06)))
+                if circles is not None:
+                    expected = (crop.shape[1] / 2, crop.shape[0] * .50)
+                    circle = min(
+                        circles[0],
+                        key=lambda item: (float(item[0]) - expected[0]) ** 2
+                        + (float(item[1]) - expected[1]) ** 2,
+                    )
+                    distance = ((float(circle[0]) - expected[0]) ** 2
+                                + (float(circle[1]) - expected[1]) ** 2) ** .5
+                    if distance <= w * .07:
+                        observation.overlays.append("costume_promo")
+                        observation.elements.append(
+                            close_circle_element(observation, circle, (x0, y0)))
     return observation
 
 

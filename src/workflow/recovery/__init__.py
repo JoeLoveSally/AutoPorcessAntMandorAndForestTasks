@@ -39,7 +39,8 @@ def dismiss(session, observation=None):
             )
         elif any(kind in obs.overlays
                  for kind in ("manor_ad", "forest_campaign", "app_update",
-                              "home_promo", "farm_promo", "farm_gift")):
+                              "home_promo", "farm_promo", "farm_gift",
+                              "costume_promo")):
             # Homepage ads retain the manor page underneath and forest campaign
             # modals retain the forest home, so the close circle created by the
             # current observation's vision rule cannot become stale across
@@ -53,10 +54,15 @@ def dismiss(session, observation=None):
             # farm whose auto-jump drawer has no static entry to return to.
             # The fertilize's 丰收礼包 popup (2026-09-30, run f427d5) too:
             # Back exited the whole 芭芭农场 container onto feed instead of
-            # closing the popup.
+            # closing the popup. The 秋日美满 costume campaign modal
+            # (2026-10-09, run e81885) closes the same way: its
+            # full-screen touch layer swallowed the 家庭 nav tap while the
+            # page still read manor, and Back from the manor container
+            # walks the mini-program out (spec L67 closes popups with X).
             kind = next(kind for kind in ("manor_ad", "forest_campaign",
                                           "app_update", "home_promo",
-                                          "farm_promo", "farm_gift")
+                                          "farm_promo", "farm_gift",
+                                          "costume_promo")
                         if kind in obs.overlays)
             close = next((e for e in obs.elements if e.text == "广告关闭"), None)
             if close is None:

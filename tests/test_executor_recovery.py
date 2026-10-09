@@ -297,6 +297,47 @@ def test_farm_promo_closes_via_its_circle_and_never_back():
     assert close.text == "广告关闭"
 
 
+def test_costume_promo_closes_via_its_circle_and_never_back():
+    # Device evidence (2026-10-09, run e81885): the full-screen 秋日美满
+    # costume modal swallowed the 家庭 tap while the page kept reading
+    # manor; Back from the manor container walks the mini-program out, so
+    # the modal closes through its bottom-center circle only.
+    promo = Observation(
+        "promo", 0.0, 1440, 3200, "alipay",
+        [Element("主题装扮来拉", (469, 1156, 983, 1272), "promo"),
+         Element("广告关闭", (673, 2403, 767, 2497), "promo")],
+        page="manor", overlays=["costume_promo"],
+    )
+    clear = Observation("clear", 1.0, 1440, 3200, "alipay", [], page="manor")
+
+    class RecordingSession(Session):
+        def __init__(self):
+            super().__init__(SimpleNamespace(), {})
+            self.task = "manor.family.donate_egg"
+            self.tapped = None
+            self._captures = iter((clear,))
+            self.ex = SimpleNamespace(tap=self._tap)
+
+        def _tap(self, _obs, close, predicate, name, _task, **_kwargs):
+            assert predicate(clear)
+            self.tapped = (name, close)
+
+        def observe(self, _reason="observe"):
+            return next(self._captures)
+
+        def back_observation(self, *_args, **_kwargs):
+            raise AssertionError("Back would walk the manor container out")
+
+    session = RecordingSession()
+
+    result = dismiss(session, promo)
+
+    assert result is clear
+    name, close = session.tapped
+    assert name == "close-costume-promo"
+    assert close.text == "广告关闭"
+
+
 def test_app_update_prompt_wins_the_close_and_never_back_or_update():
     # Device evidence (2026-10-08, run 1ed031): the 版本更新 prompt dims
     # the home band while the banner copy stays exposed, so its frame can

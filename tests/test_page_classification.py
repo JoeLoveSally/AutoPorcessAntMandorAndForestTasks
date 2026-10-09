@@ -507,6 +507,43 @@ def test_farm_gift_popup_survives_the_ocr_半_misread_on_the_claimed_state():
     assert abs(close[0].point[1] / obs.height - .726) < .03
 
 
+def test_costume_promo_modal_is_a_dismissible_overlay_with_close_control():
+    # Device evidence (2026-10-09, run e81885): the 秋日美满 modal dimmed
+    # the manor (left band gray 34 against a clean home's 172) while the
+    # bottom nav stayed readable, so the page kept classifying manor and
+    # donate_egg's 家庭 tap was swallowed by the modal's full-screen touch
+    # layer across eight refreshes. Its close circle carries no OCR text -
+    # the scan must find it dead-centered at .766h.
+    obs = screen_observation(
+        "manor-costume",
+        ["蚂蚁庄园", "秋日美满", "主题装扮来拉", "NBA限定装扮", "活力上线",
+         "去抽装扮", "一键连抽", "领红包", "好友", "领饲料", "家庭", "去捐蛋",
+         "1560g"],
+        "manor_costume_modal.jpg",
+    )
+
+    assert obs.page == "manor"
+    assert obs.overlays == ["costume_promo"]
+    close = [element for element in obs.elements if element.text == "广告关闭"]
+    assert len(close) == 1
+    assert abs(close[0].point[0] / obs.width - .50) < .03
+    assert abs(close[0].point[1] / obs.height - .766) < .03
+
+
+def test_costume_copy_on_an_undimmed_manor_home_never_fires_the_scan():
+    # The campaign copy could outlive the modal as scene decoration after
+    # the close; the dim band (34 modal against 172 clean) is the gate that
+    # keeps a bright home from ever launching the circle scan.
+    obs = screen_observation(
+        "manor-costume-clean",
+        ["蚂蚁庄园", "秋日美满", "主题装扮来拉", "去抽装扮", "领饲料", "家庭"],
+        "manor_home_clean.jpg",
+    )
+
+    assert obs.page == "manor"
+    assert "costume_promo" not in obs.overlays
+
+
 def test_farm_fertilize_home_is_never_flagged():
     # The settled fertilize home (施肥 + 主即领肥, run f427d5 frame 0154)
     # carries no 丰收礼包 title; the scan band there produced no circle
