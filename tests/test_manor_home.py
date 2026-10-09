@@ -12,6 +12,11 @@ def observation(oid, texts, page="manor"):
                        [Element(text, (100, 1900, 250, 1980), oid) for text in texts], page=page)
 
 
+def frame(oid, entries, page="manor"):
+    return Observation(oid, 0.0, 1440, 3200, "alipay",
+                       [Element(text, bounds, oid) for text, bounds in entries], page=page)
+
+
 class FakeSession:
     def __init__(self, first, after):
         self.first, self.after = first, after
@@ -66,6 +71,32 @@ class ManorHomeTests(unittest.TestCase):
         ManorHome(session).reward_friends()
         self.assertEqual(len(session.taps), 1)
         self.assertEqual(session.taps[0][2]["spend"], True)
+        self.assertEqual(session.done_args, [{"skipped": False}])
+
+    def test_reward_postcondition_ignores_the_floating_banner(self):
+        # Device evidence (2026-10-09, run a3b524): the 请客吃饭啦 banner
+        # floats at y .859, inside the old reward region, so its appearance
+        # alone satisfied the text-tuple comparison while the 打赏 card was
+        # unchanged - the loop then re-tapped the lingering card and died on
+        # the pixel guard's STALE. The comparison now rides the reward row
+        # (.754-.786), so only the card's own change counts.
+        card = [("茵茵/小时前", (257, 2412, 459, 2456)),
+                ("帮你喂食", (260, 2461, 424, 2506)),
+                ("打赏", (528, 2470, 601, 2514))]
+        banner = [("请客吃饭啦", (565, 2750, 785, 2793))]
+        before = frame("1", card)
+        still = frame("2", card + banner)
+        gone = frame("3", banner)
+
+        class CapturingSession(FakeSession):
+            def tap_element(self, obs, element, predicate, **kwargs):
+                self.predicate = predicate
+                return self.after
+
+        session = CapturingSession(before, gone)
+        ManorHome(session).reward_friends()
+        self.assertFalse(session.predicate(still))
+        self.assertTrue(session.predicate(gone))
         self.assertEqual(session.done_args, [{"skipped": False}])
 
     def test_diary_already_done_does_not_submit_again(self):

@@ -8,6 +8,14 @@ from domain_data import AutomationError, Element
 from screen_perception.vision import roaming_chicken_target
 
 REWARD_REGION = (0.0, 0.55, 0.55, 0.9)
+# Device evidence (2026-10-09, run a3b524): the reward card (friend name +
+# 帮你喂食 + 打赏) sits at y .754-.786, but the manor also floats an
+# unrelated 请客吃饭啦 banner at y .859 - inside REWARD_REGION, so the
+# postcondition's text-tuple comparison could be satisfied by the banner
+# alone while the 打赏 button was still drawn. The loop then re-tapped the
+# lingering card and died on the pixel guard's STALE (the card vanished
+# mid-capture). Compare the reward row itself; detection stays wide.
+REWARD_CARD = (0.0, 0.70, 0.55, 0.84)
 # The chicken-out sign has two observed boards: the roaming variant
 # (小鸡外出探险了 with a 马上去找TA CTA, run 0aa57b on 09-20) and the
 # employed variant (a bare 小鸡出去工作啦 board with no CTA, run 6b3fa4
@@ -73,12 +81,12 @@ class ManorHome:
                     return
                 obs = confirmation
                 continue
-            before = tuple(e.text for e in obs.find(".", REWARD_REGION))
+            before = tuple(e.text for e in obs.find(".", REWARD_CARD))
             obs = s.tap_element(
                 obs, matches[0],
                 lambda after, before=before: after.page == "manor" and not after.overlays and (
                     not after.has("^打赏$", REWARD_REGION)
-                    or tuple(e.text for e in after.find(".", REWARD_REGION)) != before
+                    or tuple(e.text for e in after.find(".", REWARD_CARD)) != before
                 ),
                 name="reward-friend", spend=True,
             )
