@@ -128,16 +128,24 @@ class ManorHome:
         # diary book IS the 贴贴 entry (spec L10) and it vanishes from the
         # manor once the day's diary has been read - the 09:31 read left
         # the 10:06 manor with no 小鸡日记 anchor at all (found 0 across
-        # four frames), so the always-reprobe re-run died even though the
-        # task had been page-verified hours earlier. Anchor absent plus
-        # that verified business-day record is the completion evidence;
-        # without the record the missing anchor must still fail the first
-        # attempt.
+        # four frames), so anchor absent plus the day's verified record
+        # reports already-done without re-entering. Device evidence
+        # (2026-10-08/09, runs 133fc5 and 3a6860): on a day whose diary
+        # was never generated the entry simply never renders - two first
+        # attempts of the business day found zero anchor in OCR and in
+        # the calibrated red-book vision band alike (not occluded, not
+        # read earlier, app not updated). User directive (2026-10-09):
+        # no prompt means no task - so a missing anchor without a record
+        # is this run's terminal skip instead of the old fail-closed
+        # abort; only an anchor present still drives verified completion.
         obs = s.observe("diary-entry")
-        if (not obs.find("小鸡日记|^日记$")
-                and s.ex.store.verified_status(s.task)
-                in ("SUCCESS", "ALREADY_DONE")):
-            s.done(obs, already=True)
+        if obs.page != "manor":
+            obs = s.ensure("manor")
+        if not obs.find("小鸡日记|^日记$"):
+            if s.ex.store.verified_status(s.task) in ("SUCCESS", "ALREADY_DONE"):
+                s.done(obs, already=True)
+            else:
+                s.done(obs, skipped=True)
             return
         obs = s.ensure("diary")
         if obs.has("明日再来"):
