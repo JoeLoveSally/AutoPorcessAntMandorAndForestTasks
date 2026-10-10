@@ -407,8 +407,13 @@ def test_login_gift_modal_closes_via_its_circle_and_never_back():
         def observe(self, _reason="observe"):
             return next(self._captures)
 
-        def tap_element(self, obs, element, predicate, *, name, **_kwargs):
+        def tap_element(self, obs, element, predicate, *, name, **kwargs):
             self.tapped = (name, element)
+            # The modal dims the page to UNKNOWN; ex.tap's validate rejects
+            # UNKNOWN before the overlay gate (run 213374), so the branch
+            # must pass allow_unknown through.
+            assert kwargs.get("allow_unknown") is True
+            assert kwargs.get("overlay") is True
             assert predicate(clear)
 
         def back_observation(self, *_args, **_kwargs):

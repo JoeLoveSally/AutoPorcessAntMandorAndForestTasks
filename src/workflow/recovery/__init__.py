@@ -158,6 +158,11 @@ def dismiss(session, observation=None):
                 lambda o, before=obs: removed_or_replaced("reward", before, o),
                 name="dismiss-login-gift",
                 overlay=True,
+                # The modal dims the page to UNKNOWN (run 16b346 frame 0004),
+                # and ex.tap's validate rejects UNKNOWN before the overlay
+                # gate ever runs - run 213374 died exactly there when the
+                # popup landed mid tap-postcondition.
+                allow_unknown=True,
                 recover=False,
             )
         else:
