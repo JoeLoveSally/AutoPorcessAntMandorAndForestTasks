@@ -372,7 +372,22 @@ class Manor:
             s.tap("^施肥$", lambda o:o.has("[立三主]即领肥|施肥挑战"), spend=True,
                   detail={"fertilization":index+1})
             if s.obs.has("施肥挑战"):
-                s.back(("farm",))
+                # Device evidence (2026-10-10, run 016183): with the live
+                # 限时挑战 window open (04:45 countdown, opponent matched),
+                # the bottom 施肥 key is hijacked into the challenge lobby
+                # (健桥(我)/随机对手/施肥0次/开始挑战, frame 0305) and the
+                # lobby's Android Back pops the whole 芭芭农场 container out
+                # to feed - back(("farm",)) starved on page=feed across eight
+                # frames and timed out. The farm home's persistent
+                # 参与施肥挑战赢大额奖励 card also satisfies the tap's
+                # 施肥挑战 arm on the pre-pour frame (0304), so the branch
+                # can fire before the lobby even renders; accept both
+                # landings (farm home / feed) and end the fertilize section
+                # on the spot - the harvest-gift steps below need a real
+                # pour, and one more Back from feed would leave the manor
+                # for its home.
+                s.back(("farm", "feed"))
+                break
             s.tap("[立三主]即领肥", lambda o:o.has("丰收礼包"))
             # Device evidence (2026-09-30, run f427d5): the claim tap finds
             # the popup already classified farm_gift, so it must ride the
@@ -386,7 +401,8 @@ class Manor:
             from workflow.recovery import dismiss
 
             s.obs = dismiss(s, s.obs)
-        s.back(("feed",))
+        if s.obs.page != "feed":
+            s.back(("feed",))
         s.complete_row("^去芭芭农场")
 
     def kitchen(self):

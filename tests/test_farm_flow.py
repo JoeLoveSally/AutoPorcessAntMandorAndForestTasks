@@ -48,7 +48,7 @@ class FarmExecutor:
 
 
 class FarmSession:
-    def __init__(self, tail=False):
+    def __init__(self, tail=False, challenge=False):
         self.task = "manor.feed.farm"
         self.absent = set()
         self.home = observation("home", ["支付宝·芭芭农场", "施肥", "肥料"],
@@ -75,6 +75,15 @@ class FarmSession:
                 Element("广告关闭", (660, 2261, 780, 2381), popup.id))
         self.obs = self.home
         self.tail = tail
+        self.challenge = challenge
+        # Device evidence (2026-10-10, run 016183): with the live 限时挑战
+        # window open, the 施肥 key lands on the matched lobby and its Back
+        # pops the whole 芭芭农场 container out to feed.
+        self.lobby = observation(
+            "lobby", ["施肥挑战赢3000肥料", "3分钟内施肥次数超过对手赢肥料",
+                      "健桥(我)", "随机对手", "施肥0次", "开始挑战"], "farm")
+        self.challenge_feed = observation(
+            "challenge-feed", ["蚂蚁庄园", "去芭芭农场", "领取"], "feed")
         self.fertilizations = 0
         self.claim_rides_overlay = False
         self.ex = FarmExecutor(self)
@@ -83,6 +92,7 @@ class FarmSession:
         self.claim_taps = 0
         self.backs = []
         self.drawer_closed = False
+        self.completed_rows = []
 
     def observe(self, reason="observe"):
         return self.obs
@@ -91,10 +101,24 @@ class FarmSession:
         self.row_calls.append(title)
         if title in self.absent:
             return self.obs, None, None
-        text = "去完成" if title == "^去芭芭农场" else "领取"
+        if title == "^去芭芭农场":
+            # The entry probe must read pending (去完成) or the flow
+            # shortcuts to already-done; in challenge mode the final
+            # complete_row instead finds the card claimable (run 016183).
+            text = ("领取" if self.challenge and self.row_calls.count(title) > 1
+                    else "去完成")
+        else:
+            text = "领取"
         anchor = Element(title, (100, 400, 900, 470), "row")
         button = Element(text, (1150, 900, 1350, 970), "row")
         return self.obs, anchor, button
+
+    def complete_row(self, title, page="feed", claim=False):
+        obs, _, button = self.row(title, reset=True, page=page)
+        if button.text != "领取":
+            raise AutomationError(f"Task completion not verified: {title}")
+        self.completed_rows.append(title)
+        return obs
 
     def tap_element(self, obs, button, predicate, **kwargs):
         name = kwargs.get("name")
@@ -123,6 +147,11 @@ class FarmSession:
 
     def back(self, target, **kwargs):
         self.backs.append(target)
+        if self.challenge:
+            # Run 016183: the lobby's Back lands on feed, and the flow must
+            # continue from there instead of raising.
+            self.obs = self.challenge_feed
+            return self.obs
         self.obs = self.home
         raise Stop
 
@@ -137,6 +166,13 @@ class FarmSession:
             if self.fertilizations:
                 # Round 2 only re-runs what round 1 already proved.
                 raise Stop
+            if self.challenge:
+                # Run 016183: the live lobby owns the key; the tap's
+                # 施肥挑战 arm is satisfied by the home's persistent card.
+                assert predicate(self.lobby)
+                self.fertilizations += 1
+                self.obs = self.lobby
+                return self.obs
             assert predicate(self.fert_prompt)
             self.fertilizations += 1
             self.obs = self.fert_prompt
@@ -205,6 +241,25 @@ def test_fertilize_tail_claims_through_the_overlay_and_closes_its_circle():
     assert session.claim_rides_overlay is True
     assert session.ex.closes == ["close-farm-gift"]
     assert session.backs == []
+
+
+def test_live_challenge_lobby_owns_the_fertilize_key_and_exits_on_feed():
+    # Device evidence (2026-10-10, run 016183): with the 限时挑战 window live
+    # (04:45 countdown, opponent already matched), the bottom 施肥 key opened
+    # the challenge lobby (frame 0305) and the lobby's Android Back popped
+    # the whole 芭芭农场 container to feed - back(("farm",)) starved on
+    # page=feed across eight frames and timed the task out. The branch must
+    # accept the feed landing, end the fertilize section on the lobby (the
+    # harvest-gift steps need a real pour) and finish the row from the feed
+    # the back delivered - one more Back would leave the manor for its home.
+    session = FarmSession(tail=True, challenge=True)
+
+    Manor(session).farm()
+
+    assert session.fertilizations == 1
+    assert session.backs == [("farm", "feed")]
+    assert session.completed_rows == ["^去芭芭农场"]
+    assert session.obs is session.challenge_feed
 
 
 class BindingGateSession:
