@@ -276,7 +276,29 @@ class Manor:
             # claimable as the completion evidence for this daily task.
             s.done(obs, already=True)
             return
-        s.tap_element(obs, button, lambda o:o.page in ("farm", "farm_tasks"), name="farm-open")
+        s.tap_element(obs, button, lambda o:o.page in ("farm", "farm_tasks")
+                      or o.has("^去绑定淘宝账号$"), name="farm-open")
+        if s.obs.has("^去绑定淘宝账号$"):
+            # Device evidence (2026-10-09, run 9282ac): the 小号's 芭芭农场
+            # opens on its Taobao-binding landing page (支付宝·芭芭农场 /
+            # 1分钱领一箱水果 / 去绑定淘宝账号, page UNKNOWN) instead of the
+            # farm home, and it held steady for the whole 25s page timeout -
+            # the old farm-open predicate failed closed and aborted the chain
+            # at manor.feed.farm (frames 0221-0228). Opening the mini-program
+            # still satisfies the daily browse: the next run (7ef332) read the
+            # parent card as claimable (领取). Route back to the feed and let
+            # the claimable check above decide, the same "claimable row after
+            # the open means the browse is done" rule browse() applies.
+            # Device verification pending: today's card was already claimable,
+            # so this path could not be exercised a second time.
+            s.ensure("feed")
+            obs, _, button = s.row("^去芭芭农场", reset=True)
+            if re.search("领取|已完成", button.text):
+                s.done(obs, already=True)
+                return
+            raise AutomationError(
+                "Farm opened on the Taobao binding page and its card is not claimable",
+                "UNKNOWN")
         # Device evidence (2026-09-24, run ae2e4d): the farm opens behind a
         # daily offer card (headline 领1000肥料奖励, subline 浏览精选好物15s
         # 即可得, CTA 领肥料, bare × centered below the card) that covers the

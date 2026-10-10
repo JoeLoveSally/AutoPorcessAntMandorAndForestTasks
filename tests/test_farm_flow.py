@@ -10,7 +10,7 @@ wait for the spec-guaranteed jump before claiming the drawer rows.
 
 import pytest
 
-from domain_data import Element, Observation
+from domain_data import AutomationError, Element, Observation
 from workflow.manor.daily import Manor
 
 
@@ -205,3 +205,69 @@ def test_fertilize_tail_claims_through_the_overlay_and_closes_its_circle():
     assert session.claim_rides_overlay is True
     assert session.ex.closes == ["close-farm-gift"]
     assert session.backs == []
+
+
+class BindingGateSession:
+    """The 芭芭农场 mini-program's Taobao-binding landing page (run 9282ac)."""
+
+    def __init__(self, claimable=True):
+        self.task = "manor.feed.farm"
+        self.gate = observation(
+            "gate", ["支付宝·芭芭农场", "种果树得水果", "1分钱领一箱水果",
+                     "去绑定淘宝账号"], "UNKNOWN")
+        self.feed = observation("feed", ["蚂蚁庄园", "去芭芭农场"], "feed")
+        self.obs = None
+        self._rows = iter([
+            (self.feed, Element("去芭芭农场", (300, 2400, 700, 2460), "feed"),
+             Element("去完成", (1150, 2400, 1300, 2460), "feed")),
+            (self.feed, Element("去芭芭农场", (300, 2400, 700, 2460), "feed"),
+             Element("领取" if claimable else "去完成",
+                     (1150, 2400, 1300, 2460), "feed")),
+        ])
+        self.done_args = []
+        self.ensure_calls = []
+        self.open_predicates = []
+
+    def row(self, _pattern, reset=False, page="feed"):
+        return next(self._rows)
+
+    def tap_element(self, _obs, _element, predicate, **_kwargs):
+        self.open_predicates.append(predicate)
+        self.obs = self.gate
+        return self.gate
+
+    def ensure(self, page):
+        self.ensure_calls.append(page)
+        self.obs = self.feed
+        return self.feed
+
+    def done(self, _obs, **kwargs):
+        self.done_args.append(kwargs)
+
+
+def test_farm_accepts_the_binding_landing_and_finishes_on_a_claimable_card():
+    # Device evidence (2026-10-09, run 9282ac): the 小号's 芭芭农场 opened on
+    # its Taobao-binding landing page (page UNKNOWN, frames 0221-0228) and
+    # held steady for the whole 25s page timeout, so the old farm-open
+    # predicate failed closed and aborted the chain. The open still counted
+    # as the daily browse - the next run (7ef332) read the parent card as
+    # claimable (领取) - so the flow must accept the landing, route back to
+    # the feed and finish on the claimable card.
+    session = BindingGateSession()
+
+    Manor(session).farm()
+
+    assert session.open_predicates[0](session.gate)
+    assert not session.open_predicates[0](session.feed)
+    assert session.ensure_calls == ["feed"]
+    assert session.done_args == [{"already": True}]
+
+
+def test_farm_still_fails_closed_when_the_binding_page_leaves_the_card_pending():
+    session = BindingGateSession(claimable=False)
+
+    with pytest.raises(AutomationError, match="not claimable"):
+        Manor(session).farm()
+
+    assert session.ensure_calls == ["feed"]
+    assert session.done_args == []
