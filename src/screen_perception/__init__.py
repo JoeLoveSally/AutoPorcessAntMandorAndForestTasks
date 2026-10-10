@@ -552,6 +552,45 @@ def classify(observation):
                         circle = max(centered, key=lambda item: float(item[1]))
                         observation.elements.append(
                             close_circle_element(observation, circle, (x0, y0)))
+    # Device evidence (2026-10-10, run e462d4, frame 0464): the 小号's forest
+    # home opened under the 人参果树主题装扮 full-screen campaign modal - a
+    # purple-tinted dim (frame mean 84, left band 47 against a bright scene)
+    # that leaves the forest page rule matching, so no overlay fired and
+    # three collect-energy taps at the 15g ball (350,672) were swallowed by
+    # the modal's touch layer until the postcondition starved
+    # (collect-energy; page=forest). The modal is page-independent like the
+    # achievement one and its close carries no OCR text: the only centered
+    # circle in the .70-.92h band is the X at (719,2610) r46, dead-centered
+    # at .816h, while the 森林广场 icon badges below are off-center - the
+    # nearest-to-expected pick keeps them out.
+    if observation.has("人参果树主题扮来啦") and observation.image is not None:
+        image = observation.image
+        h, w = image.shape[:2]
+        band = cv2.cvtColor(image[int(h * .62):int(h * .90), 0:int(w * .10)],
+                            cv2.COLOR_BGR2GRAY)
+        if band.size and cv2.mean(band)[0] < 140:
+            x0, y0 = int(w * .25), int(h * .70)
+            crop = cv2.cvtColor(image[y0:int(h * .92), x0:int(w * .75)],
+                                cv2.COLOR_BGR2GRAY)
+            if crop.size:
+                blurred = cv2.GaussianBlur(crop, (5, 5), 1.2)
+                circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, 1.2, 80,
+                                           param1=100, param2=45,
+                                           minRadius=max(20, int(w * .02)),
+                                           maxRadius=max(40, int(w * .07)))
+                if circles is not None:
+                    expected = (crop.shape[1] / 2, crop.shape[0] * .50)
+                    circle = min(
+                        circles[0],
+                        key=lambda item: (float(item[0]) - expected[0]) ** 2
+                        + (float(item[1]) - expected[1]) ** 2,
+                    )
+                    distance = ((float(circle[0]) - expected[0]) ** 2
+                                + (float(circle[1]) - expected[1]) ** 2) ** .5
+                    if distance <= w * .07:
+                        observation.overlays.append("theme_promo")
+                        observation.elements.append(
+                            close_circle_element(observation, circle, (x0, y0)))
     return observation
 
 

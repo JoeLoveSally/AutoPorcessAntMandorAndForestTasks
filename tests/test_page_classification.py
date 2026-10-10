@@ -638,6 +638,40 @@ def test_login_gift_copy_on_an_undimmed_page_never_launches_the_scan():
                 if element.text == "广告关闭"]
 
 
+def test_forest_theme_modal_is_a_dismissible_overlay_with_close_control():
+    # Device evidence (2026-10-10, run e462d4, frame 0464): the 人参果树
+    # campaign modal dims the forest home (left band 47) while the forest
+    # page rule keeps matching, so the tap-swallowing modal never fired an
+    # overlay and three collect-energy taps starved. The title-gated scan
+    # must claim it and append the bottom-center circle at .82h - the
+    # 森林广场 icon badges below sit off-center and out of the pick.
+    obs = screen_observation(
+        "forest-theme",
+        ["11:04", "蚂蚁森林", "小布", "710g", "15g",
+         "人参果树主题扮来啦", "更有2套主题皮肤、1.5倍能量翻倍卡可得",
+         "观内闲庭皮肤", "天地灵根皮肤", "1.5倍能量", "1吨能量", "立即抽奖"],
+        "forest_theme_modal.jpg",
+    )
+
+    assert "theme_promo" in obs.overlays
+    close = [element for element in obs.elements if element.text == "广告关闭"]
+    assert len(close) == 1
+    assert abs(close[0].point[0] / obs.width - .50) < .03
+    assert abs(close[0].point[1] / obs.height - .82) < .03
+
+
+def test_forest_theme_copy_on_an_undimmed_page_never_fires_the_scan():
+    # The campaign title could linger as toast text after the close; the
+    # dim band (47 modal against a bright scene) gates the circle hunt.
+    obs = screen_observation(
+        "forest-theme-clean",
+        ["11:04", "蚂蚁森林", "人参果树主题扮来啦", "立即抽奖"],
+        "manor_home_clean.jpg",
+    )
+
+    assert "theme_promo" not in obs.overlays
+
+
 def test_farm_fertilize_home_is_never_flagged():
     # The settled fertilize home (施肥 + 主即领肥, run f427d5 frame 0154)
     # carries no 丰收礼包 title; the scan band there produced no circle

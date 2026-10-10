@@ -96,6 +96,27 @@ def dismiss(session, observation=None):
                 allow_unknown=True,
                 recover=False,
             )
+        elif "theme_promo" in obs.overlays:
+            # Device evidence (2026-10-10, run e462d4): the 人参果树 theme
+            # campaign modal dims the forest home yet keeps its page rule
+            # matching, so this close is neither page-gated nor CTA-anchored
+            # - classify's title-gated scan appends 广告关闭 at (719,2610)
+            # r46 and the overlay-removal postcondition guards the press.
+            # Fail closed rather than fall through to a Back that could walk
+            # the forest container out.
+            close = next((e for e in obs.elements if e.text == "广告关闭"), None)
+            if close is None:
+                raise AutomationError("theme_promo has no verified close control", "OVERLAY")
+            session.ex.tap(
+                obs,
+                close,
+                lambda o, before=obs: removed_or_replaced("theme_promo", before, o),
+                "close-theme-promo",
+                session.task,
+                allow_overlay=True,
+                allow_unknown=True,
+                recover=False,
+            )
         elif "reward" in obs.overlays and obs.has("开心收下|我知道啦"):
             target = obs.one("开心收下|我知道啦")
             session.tap_element(

@@ -454,6 +454,72 @@ def test_login_gift_without_its_close_circle_fails_closed():
         dismiss(BareSession(), promo)
 
 
+def test_forest_theme_modal_closes_via_its_circle_and_never_back():
+    # Device evidence (2026-10-10, run e462d4): the 人参果树 theme modal
+    # swallowed three collect-energy taps on the dimmed forest home - no
+    # page change, no Back-worthy state. Its close rides classify's vision
+    # element; the branch must tap it and never Back out of the forest
+    # container.
+    promo = Observation(
+        "promo", 0.0, 1440, 3200, "alipay",
+        [Element("人参果树主题扮来啦", (215, 927, 1232, 1037), "promo"),
+         Element("广告关闭", (673, 2564, 765, 2656), "promo")],
+        page="forest", overlays=["theme_promo"],
+    )
+    clear = Observation("clear", 1.0, 1440, 3200, "alipay", [], page="forest")
+
+    class RecordingSession(Session):
+        def __init__(self):
+            super().__init__(SimpleNamespace(), {})
+            self.task = "forest.self"
+            self.tapped = None
+            self._captures = iter((clear,))
+            self.ex = SimpleNamespace(tap=self._tap)
+
+        def _tap(self, _obs, close, predicate, name, _task, **kwargs):
+            assert predicate(clear)
+            assert kwargs.get("allow_overlay") is True
+            assert kwargs.get("allow_unknown") is True
+            self.tapped = (name, close)
+
+        def observe(self, _reason="observe"):
+            return next(self._captures)
+
+        def back_observation(self, *_args, **_kwargs):
+            raise AssertionError("Back would walk the forest container out")
+
+    session = RecordingSession()
+
+    result = dismiss(session, promo)
+
+    assert result is clear
+    name, close = session.tapped
+    assert name == "close-theme-promo"
+    assert close.text == "广告关闭"
+
+
+def test_forest_theme_modal_without_its_close_circle_fails_closed():
+    promo = Observation(
+        "promo", 0.0, 1440, 3200, "alipay",
+        [Element("人参果树主题扮来啦", (215, 927, 1232, 1037), "promo")],
+        page="forest", overlays=["theme_promo"],
+    )
+
+    class BareSession(Session):
+        def __init__(self):
+            super().__init__(SimpleNamespace(), {})
+            self.task = "forest.self"
+
+        def observe(self, _reason="observe"):
+            raise AssertionError("the branch must resolve without re-observing")
+
+        def back_observation(self, *_args, **_kwargs):
+            raise AssertionError("Back would walk the forest container out")
+
+    with pytest.raises(AutomationError, match="no verified close control"):
+        dismiss(BareSession(), promo)
+
+
 def test_app_update_prompt_wins_the_close_and_never_back_or_update():
     # Device evidence (2026-10-08, run 1ed031): the 版本更新 prompt dims
     # the home band while the banner copy stays exposed, so its frame can
