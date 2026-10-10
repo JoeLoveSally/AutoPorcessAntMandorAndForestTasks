@@ -140,6 +140,26 @@ def dismiss(session, observation=None):
                 overlay=True,
                 recover=False,
             )
+        elif "reward" in obs.overlays and obs.has("恭喜获得七日礼包"):
+            # Device evidence (2026-10-10, run 16b346, frame 0004): the
+            # 七日礼包 login-gift modal carries no 开心收下/我知道啦 arm, so
+            # without this branch the else-Back walked the whole 蚂蚁庄园
+            # container onto the alipay home. Its close circle has no OCR
+            # text - classify's login-gift scan appends the 广告关闭
+            # element at (719,2463) r60; if the scan ever misses, fail
+            # closed rather than Back out of the container.
+            close = next((e for e in obs.elements if e.text == "广告关闭"), None)
+            if close is None:
+                raise AutomationError("七日礼包 has no verified close control",
+                                      "OVERLAY")
+            session.tap_element(
+                obs,
+                close,
+                lambda o, before=obs: removed_or_replaced("reward", before, o),
+                name="dismiss-login-gift",
+                overlay=True,
+                recover=False,
+            )
         else:
             # Back is permitted only for a recognized dismissible reward, never a pending submission.
             if session.ex.store.unresolved(session.task) or "confirm" in obs.overlays or "overflow" in obs.overlays:

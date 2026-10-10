@@ -515,6 +515,43 @@ def classify(observation):
                         observation.overlays.append("achievement_promo")
                         observation.elements.append(
                             close_circle_element(observation, circle, (x0, y0)))
+    # Device evidence (2026-10-10, run 16b346, frame 0004): the 七日礼包
+    # login-gift modal (恭喜获得七日礼包 + the seven-day reward grid) pops
+    # over the manor a beat after the entry ad closes and drops the page to
+    # UNKNOWN (frame mean 75, left band 41 against a clean home's 172), so
+    # it fires the reward family without any of that family's closing CTAs
+    # and recovery fell through to its else-Back - one Back then walked the
+    # whole 蚂蚁庄园 container out onto the alipay home (0004 -> 0006), the
+    # farm drawer / 丰收礼包 accident all over again. Its close circle is
+    # the LOWEST centered circle in the lower band: (719,2463) r60 at
+    # .770h dead-centered and stable across frames 0004/0005, while the
+    # grid's round prize icons sit higher or off-center. The modal's own
+    # 立即领取 CTA is deliberately not taken: claiming the gift is outside
+    # the spec's daily list and would open a claim-result state the chain
+    # never verified - the X alone ends the interruption.
+    if observation.has("恭喜获得七日礼包") and observation.image is not None:
+        image = observation.image
+        h, w = image.shape[:2]
+        band = cv2.cvtColor(image[int(h * .62):int(h * .90), 0:int(w * .10)],
+                            cv2.COLOR_BGR2GRAY)
+        if band.size and cv2.mean(band)[0] < 140:
+            x0, y0 = int(w * .25), int(h * .50)
+            crop = cv2.cvtColor(image[y0:int(h * .95), x0:int(w * .75)],
+                                cv2.COLOR_BGR2GRAY)
+            if crop.size:
+                blurred = cv2.GaussianBlur(crop, (5, 5), 1.2)
+                circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, 1.2, 80,
+                                           param1=100, param2=45,
+                                           minRadius=max(20, int(w * .02)),
+                                           maxRadius=max(40, int(w * .07)))
+                if circles is not None:
+                    center = crop.shape[1] / 2
+                    centered = [item for item in circles[0]
+                                if abs(float(item[0]) - center) <= w * .07]
+                    if centered:
+                        circle = max(centered, key=lambda item: float(item[1]))
+                        observation.elements.append(
+                            close_circle_element(observation, circle, (x0, y0)))
     return observation
 
 

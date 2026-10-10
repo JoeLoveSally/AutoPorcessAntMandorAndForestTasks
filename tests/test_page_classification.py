@@ -602,6 +602,42 @@ def test_achievement_copy_on_an_undimmed_page_never_fires_the_scan():
     assert "achievement_promo" not in obs.overlays
 
 
+def test_login_gift_modal_appends_its_close_circle_element():
+    # Device evidence (2026-10-10, run 16b346, frame 0004): the 七日礼包
+    # login-gift modal dims the page to UNKNOWN (left band 41 against a
+    # clean home's 172) and fires the reward family without any of that
+    # family's closing CTAs, so recovery would else-Back out of the whole
+    # container. The scan must append the bottom-center circle at .770h
+    # (719,2463) r60, stable across frames 0004/0005, as 广告关闭.
+    obs = screen_observation(
+        "login-gift",
+        ["08:40", "蚂蚁庄园", "恭喜获得七日礼包", "领取截止时间2026年10月23日",
+         "累计1天", "2天", "3天", "?抽奖次数", "+10", "已领", "加速卡",
+         "立即领取"],
+        "login_gift_modal.jpg",
+    )
+
+    assert "reward" in obs.overlays
+    close = [element for element in obs.elements if element.text == "广告关闭"]
+    assert len(close) == 1
+    assert abs(close[0].point[0] / obs.width - .50) < .03
+    assert abs(close[0].point[1] / obs.height - .77) < .03
+
+
+def test_login_gift_copy_on_an_undimmed_page_never_launches_the_scan():
+    # The gift copy could linger as toast text after the modal is gone;
+    # the dim band is the gate that keeps a bright frame from appending a
+    # phantom close control over the real page content.
+    obs = screen_observation(
+        "login-gift-clean",
+        ["08:40", "恭喜获得七日礼包", "立即领取", "已领", "加速卡"],
+        "manor_home_clean.jpg",
+    )
+
+    assert not [element for element in obs.elements
+                if element.text == "广告关闭"]
+
+
 def test_farm_fertilize_home_is_never_flagged():
     # The settled fertilize home (施肥 + 主即领肥, run f427d5 frame 0154)
     # carries no 丰收礼包 title; the scan band there produced no circle

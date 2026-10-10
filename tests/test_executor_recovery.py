@@ -383,6 +383,72 @@ def test_achievement_promo_closes_via_its_circle_and_never_back():
     assert close.text == "广告关闭"
 
 
+def test_login_gift_modal_closes_via_its_circle_and_never_back():
+    # Device evidence (2026-10-10, run 16b346): the reward family claimed
+    # the 七日礼包 login-gift modal (it carries no 开心收下/我知道啦 arm) and
+    # the else-Back walked the whole 蚂蚁庄园 container out onto the alipay
+    # home - frame 0004 -> 0006, postcondition failed: return; page=alipay.
+    # The classify scan appends the circle as 广告关闭; tap it, never Back.
+    promo = Observation(
+        "promo", 0.0, 1440, 3200, "alipay",
+        [Element("恭喜获得七日礼包", (200, 120, 1240, 260), "promo"),
+         Element("广告关闭", (659, 2403, 779, 2523), "promo")],
+        page="UNKNOWN", overlays=["reward"],
+    )
+    clear = Observation("clear", 1.0, 1440, 3200, "alipay", [], page="manor")
+
+    class RecordingSession(Session):
+        def __init__(self):
+            super().__init__(SimpleNamespace(), {})
+            self.task = "manor.home.reward_friends"
+            self.tapped = None
+            self._captures = iter((clear,))
+
+        def observe(self, _reason="observe"):
+            return next(self._captures)
+
+        def tap_element(self, obs, element, predicate, *, name, **_kwargs):
+            self.tapped = (name, element)
+            assert predicate(clear)
+
+        def back_observation(self, *_args, **_kwargs):
+            raise AssertionError("Back would walk the container onto alipay home")
+
+    session = RecordingSession()
+
+    result = dismiss(session, promo)
+
+    assert result is clear
+    name, element = session.tapped
+    assert name == "dismiss-login-gift"
+    assert element.text == "广告关闭"
+
+
+def test_login_gift_without_its_close_circle_fails_closed():
+    # The circle is the only verified control on the modal; if the scan
+    # ever misses, dismiss must raise instead of falling through to the
+    # container-exiting Back.
+    promo = Observation(
+        "promo", 0.0, 1440, 3200, "alipay",
+        [Element("恭喜获得七日礼包", (200, 120, 1240, 260), "promo")],
+        page="UNKNOWN", overlays=["reward"],
+    )
+
+    class BareSession(Session):
+        def __init__(self):
+            super().__init__(SimpleNamespace(), {})
+            self.task = "manor.home.reward_friends"
+
+        def observe(self, _reason="observe"):
+            raise AssertionError("the branch must resolve without re-observing")
+
+        def back_observation(self, *_args, **_kwargs):
+            raise AssertionError("Back would walk the container onto alipay home")
+
+    with pytest.raises(AutomationError, match="no verified close control"):
+        dismiss(BareSession(), promo)
+
+
 def test_app_update_prompt_wins_the_close_and_never_back_or_update():
     # Device evidence (2026-10-08, run 1ed031): the 版本更新 prompt dims
     # the home band while the banner copy stays exposed, so its frame can
