@@ -45,6 +45,17 @@ class Session:
     def tap(self, pattern, predicate, *, region=(0,0,1,1), spend=False, detail=None,
             overlay=False, allow_unknown=False, name=None, recover=True):
         obs = self.observe("before-" + (name or pattern))
+        # A single OCR flake can drop one page-rule anchor and flip a known
+        # surface to UNKNOWN for a frame (2026-10-10, run 33a71e: the alipay
+        # home lost 扫一扫 mid banner rotation while the tap target 蚂蚁庄园
+        # sat visibly on screen, and ex.tap's validate refused the frame
+        # before the tap could ride it out). Re-observe while the page stays
+        # unknown and overlayless; a persistent UNKNOWN still fails closed in
+        # validate, and an overlay arriving meanwhile goes to the dismissal.
+        for _ in range(2):
+            if obs.page != "UNKNOWN" or obs.overlays:
+                break
+            obs = self.observe("refresh-unknown-" + (name or pattern))
         if obs.overlays and not overlay:
             from workflow.recovery import dismiss
 
