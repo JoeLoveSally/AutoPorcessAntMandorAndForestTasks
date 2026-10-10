@@ -1,5 +1,163 @@
 # 真机校准记录
 
+## 2026-10-09：红日记本无提示日的定案与放行
+
+- run `3a6860`（10-09 第 1 跑，全链累计第 10 跑）——冷启无更新弹窗（App 未更新，
+  用户确认），reward SKIPPED、bring_home SKIPPED（小鸡在家），diary 首次尝试
+  `小鸡日记|^日记$: found 0` 再次失败——与 10-08 同点位连续第 2 天。
+- 缺位定案（双通道 + 对照裁剪）：OCR 无文本，`manor_diary_entry` 校准带视觉
+  检测返回 None（09-30 对照帧命中 (1028,1686)、红像素 96003 vs 9864）；同区域
+  裁剪并排对比确认书位只有树干水面，好友小鸡在左侧未遮挡；两日均为**当天首个
+  尝试**即缺位，用户确认 10-08 晚未手动做任何任务、App 未更新 → 属"当天无
+  日记内容、服务端不生成提示"，非读过、非遮挡、非版本变更。
+- 处置（用户指令 2026-10-09："没有提示就不做，不用纠结"）：`d3b9006` 将
+  diary 的 fail-closed 改为**无锚即 SKIPPED 终态放行**——有锚 → 照常全验证
+  提交；无锚 + 当天已验证记录 → ALREADY_DONE（`de17f44` 分支保留）；无锚 +
+  无记录 → SKIPPED，链路继续；非 manor 帧先 `ensure("manor")` 再判，防止串页
+  误判成"无提示"。测试：fail-closed 用例替换为 SKIPPED 用例 + 串页路由用例
+  （ruff clean，213 passed）。
+- run `e81885`（第 11 跑）——**diary SKIPPED 放行首验通过**（13:49:36→38，2 秒
+  终态，链路首次走通任务 3），随后死于 `^家庭$`：新上线**秋日美满全屏促销
+  弹窗**自 13:49:10 首帧起全程在场——背景压暗（左边带灰度 34 对干净主页 172）、
+  底部导航在暗层下仍可读 → 页面仍判 manor、弹窗文案不在任何规则 →
+  `overlays=[]`，tap (627,3037) 落在弹窗全屏触摸层被吞，8 帧后置刷新全滞留
+  manor 零转场；reward/bring_home/diary 三项 SKIPPED 均系弹窗下盲判（run 10
+  11:12 干净帧已有同日真凭据，业务终态不受污染）。修复 `a0d86f6`：
+  `costume_promo` overlay——文案门（秋日美满|主题装扮来[拉啦]|去抽装扮）+
+  dim<140 物理门 + Hough 扫 .62-.86h band（真帧命中 ✕ (720,2450) r47 正中），
+  dismiss 走圈关闭绝不 Back；+2 fixture（弹窗帧/干净帧）+3 测试（216 passed）。
+- 午后 WorkBuddy 接手（14:28-16:59 共 14 跑）：`e8f6d81` reward 比对收窄到
+  `REWARD_CARD` 行（页面漂浮"请客吃饭啦"横幅致重复点击 STALE）、`3a6b3ff`
+  首页券卡压暗丢签名时允许 page UNKNOWN 并在圈验证后恢复 alipay；
+  **大号当日终态 19 SUCCESS + 4 SKIPPED + 1 ALREADY_DONE 全绿（0 FAILED）**——
+  manor 段 `75b3a0` 单跑 24 项走完（19+5），森林段 `forest.self` 两败
+  （return 后置 UNKNOWN、前台被切）后由 `e5dbe4`（debug --module forest）补完。
+- 小号接入：`50566f4` 进度命名空间 `<serial>#<account>`（run lock 仍锁裸
+  serial，双号永不并驱）+ `config/config.xiao.toml`（account=xiao、
+  forest_owner=小布）；分身 = Android user 999 同包名双实例，分身前台时
+  package 判据同名、链路不重复拉起。15:41-16:59 十跑完成 20 项
+  （7 SUCCESS + 9 ALREADY_DONE + 3 SKIPPED）：踩坑修复 `daf773b`（打赏行
+  去掉图章数字比对）、`c9f40c3`（成就解锁弹窗圈关闭）、`8f86465`（来日再试
+  pill 明/朋 OCR 变体）；farm 淘宝绑定落地页（run `9282ac`，小号芭芭农场开在
+  "去绑定淘宝账号"页、page UNKNOWN）修复 `0c2af17`（落地页视为打开完成 +
+  卡片可领即 already，测试绿、设备验证排 10-10 小号跑）。
+- 当日 DB 终态：大号 24/24 全绿；小号 20 项全绿 + forest.self FAILED
+  （USB 掉线 device not found，16:59——设备断连非业务失败），森林 5 项未执行。
+
+## 2026-10-08：版本更新弹窗与红日记本缺位（隔周续跑）
+
+- 背景：09-30 后隔周续跑（10-01~10-07 账号零活动）。当日两跑 + 两项修复落码
+  （`5947b04` 丰收礼包、`d1891aa` 版本更新弹窗）。
+- run `1ed031`（第 8 跑）——启动 3 帧即死 `^蚂蚁庄园$: found 0`：隔周冷启弹出
+  **原生"版本更新"弹窗**（支付宝最新尝鲜版，CTA `立即更新`），卡片盖住首页
+  图标带，把标签裁成 庄园/芭芭/市民（"蚂蚁"半边入卡），页面仍按暴露头部判
+  alipay、无 overlay 规则认领 → 三帧全灭，run 死于第一个任务。取证（帧
+  0003/0002）：✕ 实测中心 (1183,1138)、**无环**（HoughCircles 在同窗只返回
+  卡片自身圆角弧）；dim 带 82.5 对干净帧 172.5 → home_promo 的文本+dim 双门控
+  同帧满足、仅圈扫描落空。修复 `d1891aa`：`app_update` overlay——门控
+  `版本更新`+`支付宝最新尝鲜版`，以 OCR 标题 `版本更新` [564,1562,872,1640]
+  中心 +（+465,−463）锚定 ✕（±60 盒，source=vision.ocr_anchor，pixel_guard
+  默认 28）；recovery 分支把 `app_update` 排在 `home_promo` **之前**（关弹窗
+  即去遮罩、反而解除其 dim 门控），绝不点 `立即更新`、绝不 Back；测试 +3
+  （208 passed）。规则前置于 home_promo 扫描，同帧分类实测 `overlays ==
+  ["app_update"]`。
+- run `133fc5`（第 9 跑）——**`close-app-update` 真机首验通过**（20:56:10
+  intent → 20:56:14 verified，随后 `^蚂蚁庄园$` verified），链路续行：
+  `close-home-promo` 第 2 次真机闭环（关后回首页，券卡再次现身即关、再次进
+  庄）、reward_friends SKIPPED、bring_home SUCCESS（`马上去找` →
+  `bring-chicken-home` verified）。死于 `manor.home.diary`：**红日记本首个
+  尝试即缺位**——20:57 首帧、21:05 复查均无（小鸡在家、非遮挡；与 09-30
+  首跑帧 diff 庄园结构无变更，仅内容态差异），用户确认当日未手动做过贴贴
+  小鸡 → 属服务端未生成。`de17f44` 的 fail-closed 如设计生效（无当天验证
+  记录 → 首次尝试必须失败），非代码缺陷，不做改动。
+- 机制推测（未验证）：09-28/09-29/09-30 连续活动、三日红本均在；本周零活动 →
+  10-08 红本未生成。若成立，10-09 晨恢复。
+- 当日终态（DB day=2026-10-08）：reward_friends SKIPPED（第 8 跑的 FAILED
+  已被第 9 跑翻转）、bring_home SUCCESS、diary FAILED。
+- run `95ece9`（farm 单任务 debug 跑，21:21）——diary 阻断全链期间单独真机
+  锻炼 farm 尾段，死于 `drawer-close`，**点 X 的 tap 其实成功**（:54 抽屉关、
+  落 farm 主页），三连碰撞杀掉了 postcondition：
+  ① 本周主页新增底栏 `做任务集肥料`（[535,3053,908,3117]，.95h；抽屉标题
+  在 .34h，列表只向上滚）撞上纯文本 `farm_tasks` 页规则 → 关后主页被判回
+  `farm_tasks`，`page=="farm"` 永不真；
+  ② 主页持久卡 `参与施肥挑战赢大额奖励`（新事件卡）命中 reward 规则的
+  `施肥挑战` 臂 → 无 CTA → else 分支按 Back → **容器出栈落 feed**（帧
+  0037→0038，动作名 `return`——`back_observation` 固定名，链路定论）；
+  ③ 单修页判不够：`^施肥$` 的 before 帧仍带 reward → 还是 else-Back 出栈。
+  同跑真机闭环：`close-farm-promo`（礼遇卡圈关闭）、farm-jump、claims 两行
+  缺席（optional 正常跳过）。修复 `ba91630`：classify 位置修正（底栏独占 →
+  回判 farm）+ reward 在 farm/farm_tasks 上无 `开心收下|我知道啦|
+  去蚂蚁森林收能量` 即不分类（卡片/toast 是内容非弹窗；施肥挑战弹窗走 L352
+  文本直关不依赖 overlay；spec L67 森林互推弹窗保留 else-Back 模态关闭），
+  测试 +4（212 passed）。
+- farm 第 2 跑因用户用机 + 支付宝后台被杀顺延至 10-09。
+
+## 2026-09-30：抽奖第四拼写与丰收礼包 Back 出栈
+
+- 全天两跑均止于庄园链（森林链未执行），根因同属**产品弹窗的关闭拼写/方式
+  未跟上**：`573250` 的修复当日落码（`0183523`），`f427d5` 的修复 10-08
+  落码（`5947b04`）。09-30 终态 **3 SUCCESS + 7 ALREADY_DONE + 2 SKIPPED +
+  1 FAILED**（farm）。
+- run `573250`（第 6 跑）——`manor.feed.lottery` FAILED：立即抽奖抽中
+  "恭喜抽中 6件奖品 永久套装"，结果视图 CTA 换成 `穿上装扮`——继 开心收下
+  （spec L56/L63）→ 做任务继续抽（09-23）→ 我知道了（09-24 装扮奖品）之后
+  的**第四种拼写**——三词锚 found 0 ×3 帧。修复 `0183523`：锚点加第四种
+  拼写（后置谓词不变），测试 `test_result_view_close_takes_the_suit_cta_
+  spelling`（201 passed）。本轮 10 任务完成，diary 首跑走**正常路径**
+  SUCCESS（新未读红本 + `diary-entry` 锚点探测——`de17f44` 的正常分支）。
+- run `f427d5`（第 7 跑，12/13）——`manor.feed.farm` FAILED：三项真机首验
+  成功后死在丰收礼包**已领取**态的 `back(("farm",))`：一次 Back 关掉整个
+  芭芭农场容器落 feed（抽屉 Back 同构，09-27/09-29/09-30 第三次同证），
+  8 次 return 轮询饿死。首验成功 = `close-home-promo`（dim 门控闭环）、
+  `drawer-close`（抽屉 X，`0731575` 首次真机走通）、`^施肥$` 施肥动作
+  （意图+验证走通，施肥尾段首次真机执行）+ 立即领肥 + 丰收礼包立即领取。
+- 丰收礼包取证：待领取/已领取两态帧 `0157`/`0158` 的 ✕ 同位
+  (0.50w, 0.726h) r≈56、HoughCircles 唯一命中（同 run 干净 farm 帧 8/8
+  零命中）；OCR 对同一弹窗 0155 读"丰"、0157 读"半"→ 门控 `[半丰]收礼包`；
+  dim 带与干净帧重叠（50-126）故不作物理门控。修复 `5947b04`：`farm_gift`
+  overlay 圈检测 + recovery 关闭分支 + claim 骑 `overlay=True`（session.tap
+  见 overlay 先关会丢目标）+ `dismiss(s, s.obs)` 替代 Back（spec L67
+  "点击 X 关闭丰收礼包页面"），测试 +4（205 passed）。
+- 调度侧记：run 7 中 diary/lottery 以 ALREADY_DONE 短路——diary 走的正是
+  `de17f44` 的**锚缺失 + 当天页面验证记录**分支（run 6 读掉红本后二跑无锚），
+  lottery 是 run 6 已消耗当日机会——均页面证据短路的设计行为。
+
+## 2026-09-29：五连败的帧级根因与五项修复
+
+- 全天终态：**8 SUCCESS + 2 ALREADY_DONE + 2 SKIPPED + 1 FAILED**（diary，
+  修复在其后提交、设备断连前未复跑），森林链两度被阻未执行。五次 daily
+  失败的根因全部定位并落码（`dev` 分支，门禁 ruff clean + 200 passed）：
+- run `b8d5e5`——**高版弹窗 crop 未覆盖**：09-29 版"广州生活卡"弹窗 CTA ✕
+  圈落在 y=.85h，扫带止于 .60h → found 0。修复 `d81fc74`：扫带扩至 .90h +
+  选圈判据"水平居中(≤.07w)中取 y 最大"，fixture `home_promo_0929.jpg`。
+- run `4374cb`——**banner 文案污染门控**：tap#1 已关弹窗，主页自身 banner
+  命中文本门控 → 第二轮假圈 tap → 页面点坏 → Back 退出支付宝 → 9 次
+  return 轮询 TIMEOUT。修复 `92d0759`：backdrop dim 物理门控（弹窗帧条带
+  灰度≈64-66、干净主页≈220、阈值 140），fixture `home_clean_banner_0929.jpg`。
+- run `184e67`——**频道页遗留饿死 launch**：上轮 Back 退 app 后进程存活，
+  relaunch 恢复闪购外卖频道页（三词规则外）→ `wait(page!=UNKNOWN)` 饿死，
+  而 09-23 起注释承诺的 fall-through 只覆盖 recognize 分支。修复 `cb37b0f`：
+  launch 等待超时同路径落入路由循环 back 兜底。
+- run `5742c4`——**farm 抽屉 Back 出栈**：冷启动弹窗闭环首次真机走通
+  （close-home-promo intent+verified），13 任务 12 完成；farm 领完肥料后
+  `back(("farm",))` 一次 Back 直接退出芭芭农场容器落 feed（09-27 `80393d`
+  同证），后置饿死。spec L67 明示抽屉应"点击右上角 X 关闭"。修复
+  `0731575`：X 圆钮锚定（标题 bounds 23 帧稳定 [533,1085,906,1150] +
+  中心偏移 (+535,−28)、r≈57），`drawer-close` 替代 Back。
+- 单任务 `32ef49`——farm 走 **ALREADY_DONE 短路**：5742c4 的抽屉领肥料
+  （fertilizer-claim VERIFIED）+ 逛一逛已让服务端把卡片翻成"领取"
+  （spec L68 验证方式），当日施肥尾段未执行（单测覆盖，待 09-30 链首跑）。
+- run `97e388`——**日记入口随读取消失**：09:31 读掉未读后，红日记本浮标
+  从 manor 消失（四帧零 `小鸡日记`，对照 0016 帧 bounds 处已空），调度的
+  always-reprobe 二跑 found 0。修复 `de17f44`：锚缺失 + `verified_status`
+  当天页面验证记录 → ALREADY_DONE；无记录则保持 fail-closed。
+- 调度确认：TaskManager 每次全量重探（"previous successful record never
+  authorizes skipping page probing"），任务由页面证据短路——reward_friends/
+  bring_home 二跑按页面证据落 SKIPPED 属设计行为。
+- 期间 USB 转发断连（Windows PnP 全 Unknown），09-30 恢复后续跑。
+- 待 09-30：launch fall-through、dim 门控闭环、farm 抽屉 X 与施肥尾段、
+  diary 正常/跳过两分支、森林链的真机锻炼。
+
 ## 2026-09-28：四失败复跑收口与彩票悬挂对账
 
 - 全天终态：08:56-09:42 链 24 项初值 **15 SUCCESS + 5 SKIPPED + 4 FAILED**
