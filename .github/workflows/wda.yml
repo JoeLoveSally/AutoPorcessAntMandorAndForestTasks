@@ -1,0 +1,61 @@
+# One-time WebDriverAgent build on a macOS runner: iOS has no public touch
+# injection API, and building WDA is the only step that needs macOS - the
+# daily run drives the phone from Windows/WSL2 over WDA's REST protocol.
+# The artifact is an UNSIGNED ipa; sign and install it from Windows with
+# Sideloadly/AltStore (docs/ios_bringup.md §2). Free Apple ID signatures
+# expire after 7 days - re-sign, or rerun this workflow only when the WDA
+# build itself needs updating.
+name: wda
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "WDA repository (the appium fork tracks new Xcode/iOS)"
+        default: "appium/WebDriverAgent"
+        required: true
+      ref:
+        description: "branch / tag / commit of that repository"
+        default: "main"
+        required: true
+
+jobs:
+  build-wda:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
+
+      - name: Select Xcode
+        run: |
+          # The newest installed Xcode; WDA follows the SDK it is built against.
+          XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+
+      - name: Archive unsigned WDA
+        run: |
+          xcodebuild \
+            -project WebDriverAgent.xcodeproj \
+            -scheme WebDriverAgentRunner \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            -archivePath build/wda.xcarchive \
+            archive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Pack unsigned ipa
+        run: |
+          mkdir build/Payload
+          APP=$(find build/wda.xcarchive/Products -maxdepth 2 -name "*.app" | head -1)
+          echo "Runner app: $APP"
+          cp -R "$APP" build/Payload/
+          cd build && zip -qry wda-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wda-unsigned-ipa
+          path: build/wda-unsigned.ipa
+          if-no-files-found: error
