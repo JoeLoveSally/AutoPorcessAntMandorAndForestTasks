@@ -1,10 +1,12 @@
 # One-time WebDriverAgent build on a macOS runner: iOS has no public touch
 # injection API, and building WDA is the only step that needs macOS - the
 # daily run drives the phone from Windows/WSL2 over WDA's REST protocol.
-# The artifact is an UNSIGNED ipa; sign and install it from Windows with
-# Sideloadly/AltStore (docs/ios_bringup.md §2). Free Apple ID signatures
-# expire after 7 days - re-sign, or rerun this workflow only when the WDA
-# build itself needs updating.
+# The artifact is an UNSIGNED ipa published as a public release asset;
+# sign and install it from Windows with Sideloadly/AltStore
+# (docs/ios_bringup.md §2). Free Apple ID signatures expire after 7 days -
+# re-sign, or rerun this workflow only when the WDA build itself needs
+# updating. Pushing a change to this file triggers a build automatically;
+# manual runs stay available via workflow_dispatch.
 name: wda
 
 on:
@@ -18,15 +20,24 @@ on:
         description: "branch / tag / commit of that repository"
         default: "main"
         required: true
+  push:
+    paths:
+      - ".github/workflows/wda.yml"
+
+permissions:
+  contents: write
 
 jobs:
   build-wda:
     runs-on: macos-latest
+    env:
+      WDA_REPOSITORY: ${{ inputs.repository || 'appium/WebDriverAgent' }}
+      WDA_REF: ${{ inputs.ref || 'main' }}
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.repository }}
-          ref: ${{ inputs.ref }}
+          repository: ${{ env.WDA_REPOSITORY }}
+          ref: ${{ env.WDA_REF }}
 
       - name: Select Xcode
         run: |
@@ -59,3 +70,14 @@ jobs:
           name: wda-unsigned-ipa
           path: build/wda-unsigned.ipa
           if-no-files-found: error
+
+      - name: Publish a public release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "wda-run-${{ github.run_number }}" \
+            --repo "${{ github.repository }}" \
+            --title "WDA unsigned build: ${WDA_REPOSITORY}@${WDA_REF} (run ${{ github.run_number }})" \
+            --notes "Unsigned WebDriverAgent ipa built from ${WDA_REPOSITORY}@${WDA_REF}. Sign and install from Windows with Sideloadly/AltStore (docs/ios_bringup.md §2); free Apple ID signatures last 7 days." \
+            --prerelease \
+            build/wda-unsigned.ipa
