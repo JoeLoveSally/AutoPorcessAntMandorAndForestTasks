@@ -72,28 +72,33 @@ jobs:
         # The archive's install phase leaves Products/ empty (SKIP_INSTALL on
         # the runner), but the fully built app lands under the archive
         # intermediates - take the shallowest .app under build/ whatever
-        # layout the current Xcode produces, and keep the candidate list for
-        # the failure path.
+        # layout the current Xcode produces. The runner shell runs with
+        # bash -e, so every pipeline fully consumes its input (sed instead
+        # of head - no SIGPIPE) and failures are explicit, with the exit
+        # code appended to the log via trap.
         run: |
-          set -uo pipefail
+          set -o pipefail
+          trap 'echo "pack exited rc=$?" | tee -a ci-pack-log.txt' EXIT
           {
             echo "== .app candidates under build/ =="
             find build -name '*.app' 2>/dev/null | sed -n '1,100p'
           } | tee ci-pack-log.txt
           APP=$(find build -name '*.app' 2>/dev/null \
-            | awk -F/ '{print NF"\t"$0}' | sort -n | head -1 | cut -f2)
+            | awk -F/ '{print NF"\t"$0}' | sort -n | sed -n '1p' | cut -f2) || APP=""
           echo "Selected runner app: ${APP:-<none>}" | tee -a ci-pack-log.txt
           if [ -z "$APP" ]; then
-            echo "no .app product found in the archive" | tee -a ci-pack-log.txt
+            echo "no .app product found under build/" | tee -a ci-pack-log.txt
             exit 1
           fi
           mkdir -p build/Payload
-          cp -R "$APP" build/Payload/
-          if [ ! -d "build/Payload/$(basename "$APP")" ]; then
+          if ! cp -R "$APP" build/Payload/; then
             echo "copying the runner app into Payload failed" | tee -a ci-pack-log.txt
             exit 1
           fi
-          (cd build && zip -qry wda-unsigned.ipa Payload)
+          if ! (cd build && zip -qry wda-unsigned.ipa Payload); then
+            echo "zipping Payload failed" | tee -a ci-pack-log.txt
+            exit 1
+          fi
           ls -la build/wda-unsigned.ipa | tee -a ci-pack-log.txt
 
       - uses: actions/upload-artifact@v4
@@ -120,16 +125,23 @@ jobs:
         run: |
           # Actions run logs need repo admin; pushing the captured stage logs
           # keeps failures readable over raw.githubusercontent.com instead.
+          # Updating an existing file via the contents API requires its
+          # current sha, otherwise every PUT 422s.
           pushed=0
           for f in ci-xcode-log.txt ci-project-log.txt ci-archive-log.txt ci-pack-log.txt; do
             [ -f "$f" ] || continue
-            tail -c 300000 "$f" > ci-capped.txt
-            gh api -X PUT "repos/${{ github.repository }}/contents/ci/wda/$f" \
-              -f message="wda: $f from failed run ${{ github.run_number }}" \
-              -f content="$(base64 -i ci-capped.txt | tr -d '\n')" \
-              -f branch="${{ github.ref_name }}" >/dev/null \
-              && pushed=1 || echo "could not push $f"
+            tail -c 200000 "$f" > ci-capped.txt
+            SHA=$(gh api "repos/${{ github.repository }}/contents/ci/wda/$f?ref=${{ github.ref_name }}" --jq '.sha' 2>/dev/null || true)
+            ARGS=(-f message="wda: $f from failed run ${{ github.run_number }}"
+                  -f content="$(base64 -i ci-capped.txt | tr -d '\n')"
+                  -f branch="${{ github.ref_name }}")
+            [ -n "$SHA" ] && ARGS+=(-f sha="$SHA")
+            if gh api -X PUT "repos/${{ github.repository }}/contents/ci/wda/$f" "${ARGS[@]}" >/dev/null; then
+              pushed=1
+            else
+              echo "could not push $f"
+            fi
           done
           if [ "$pushed" = "0" ]; then
-            echo "no stage logs captured before the failure"
+            echo "no stage logs were pushed"
           fi
