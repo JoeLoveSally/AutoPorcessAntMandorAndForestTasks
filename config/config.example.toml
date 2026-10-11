@@ -1,3 +1,5 @@
+# Platform driving this config: "android" (adb) or "ios" (WebDriverAgent).
+platform = "android"
 serial = "10AD4419NX0029Z"
 # Namespaces this account's daily progress in runtime/task_state.db. Two
 # Alipay accounts on one phone share the device serial, so each account
@@ -24,3 +26,14 @@ rain_countdown_seconds = 2.6
 rain_duration_seconds = 22.0
 rain_dedup_radius = 46
 rain_touch_prediction = 0.08
+
+# iOS profile (platform = "ios"): `serial` is the iPhone udid, `package` the
+# iOS bundle id, and `wda_url` the reachable WebDriverAgent endpoint (USB
+# port forward or Wi-Fi - verify the bundle id against the installed Alipay
+# build during bring-up). See docs/ios_bringup.md for installing and
+# forwarding the agent from a Windows/Linux host without a Mac.
+# platform = "ios"
+# serial = "00008030-XXXXXXXXXXXXXXXX"
+# package = "com.alipay.iphoneclient"
+# wda_url = "http://127.0.0.1:8100"
+# wda_timeout = 10.0

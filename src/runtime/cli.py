@@ -26,6 +26,31 @@ def config_path(root, explicit=None):
     return path
 
 
+def required_executables(config):
+    """External binaries the chosen platform needs on PATH.
+
+    adb and ffmpeg drive Android shell, screencap and the realtime stream;
+    the iOS client speaks HTTP to WebDriverAgent and shells out to nothing.
+    """
+    if config.get("platform", "android") != "android":
+        return ()
+    return (config.get("adb", "adb"), config.get("ffmpeg", "ffmpeg"))
+
+
+def build_device(config, serial):
+    """Construct the backend the config's platform asks for."""
+    platform = config.get("platform", "android")
+    if platform == "android":
+        return Device(serial, config.get("adb", "adb"))
+    if platform == "ios":
+        from device_bridge.ios import IosDevice
+
+        if not config.get("wda_url"):
+            raise AutomationError("platform=ios requires wda_url", "CONFIG")
+        return IosDevice(config["wda_url"], serial, config.get("wda_timeout", 10.0))
+    raise AutomationError(f"Unknown platform: {platform}", "CONFIG")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=("doctor", "capture", "daily", "debug"))
@@ -44,19 +69,26 @@ def main():
         selected_config = config_path(root, args.config)
         config = tomllib.loads(selected_config.read_text())
         serial = args.serial or config["serial"]
-        for executable in (config.get("adb", "adb"), config.get("ffmpeg", "ffmpeg")):
+        platform = config.get("platform", "android")
+        if platform not in ("android", "ios"):
+            raise AutomationError(f"Unknown platform: {platform}", "CONFIG")
+        for executable in required_executables(config):
             if shutil.which(executable) is None:
                 raise AutomationError(f"Required executable not found: {executable}", "CONFIG")
         store = Store(root / "runtime", serial, run, config.get("account", ""))
-        device = Device(serial, config.get("adb", "adb"))
+        device = build_device(config, serial)
         if args.command == "doctor":
             info = device.info()
-            info["tools"] = {
-                "adb": shutil.which(config.get("adb", "adb")),
-                "ffmpeg": shutil.which(config.get("ffmpeg", "ffmpeg")),
-            }
-            info["display"] = [s.strip() for s in info["display"].splitlines()
-                               if "SurfaceOrientation" in s or "SurfaceWidth" in s or "SurfaceHeight" in s]
+            info["platform"] = platform
+            if platform == "android":
+                info["tools"] = {
+                    "adb": shutil.which(config.get("adb", "adb")),
+                    "ffmpeg": shutil.which(config.get("ffmpeg", "ffmpeg")),
+                }
+                info["display"] = [s.strip() for s in info["display"].splitlines()
+                                   if "SurfaceOrientation" in s or "SurfaceWidth" in s or "SurfaceHeight" in s]
+            else:
+                info["tools"] = {"wda": config.get("wda_url")}
             print(json.dumps(info, ensure_ascii=False, indent=2))
             return 0
         observer = Observer(device, root / "screenshots/runs" / run, logger)
@@ -84,10 +116,11 @@ def main():
         print(f"FAILED: {exc}\nLog: {logger.path}", file=sys.stderr)
         return 1
     finally:
-        if device is not None and device.metrics:
+        metrics = device.metrics_summary() if device is not None else {}
+        if metrics:
             # Per-command ADB timings: the split that shows where each
             # ~3.4s observation goes (dumpsys vs screencap vs input).
-            logger.emit("device.metrics", calls=device.metrics_summary())
+            logger.emit("device.metrics", calls=metrics)
         if store:
             store.close()
 
