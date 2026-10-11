@@ -1,0 +1,45 @@
+Command line invocation:
+    /Applications/Xcode_26.6.app/Contents/Developer/usr/bin/xcodebuild -list -project WebDriverAgent.xcodeproj
+
+Information about project "WebDriverAgent":
+    Targets:
+        WebDriverAgentLib
+        WebDriverAgentLib_tvOS
+        WebDriverAgentLib_watchOS
+        WebDriverAgentRunner
+        WebDriverAgentRunner_tvOS
+        WebDriverAgentRunner_watchOS
+        UnitTests
+        UnitTests_tvOS
+        IntegrationTests_1
+        IntegrationTests_2
+        IntegrationTests_3
+        IntegrationApp
+        IntegrationApp_tvOS
+        IntegrationTests_tvOS
+        IntegrationApp_watchOS
+        IntegrationTests_watchOS
+
+    Build Configurations:
+        Debug
+        Release
+
+    If no build configuration is specified and -scheme is not passed then "Release" is used.
+
+    Schemes:
+        IntegrationApp
+        IntegrationApp_tvOS
+        IntegrationApp_watchOS
+        IntegrationTests_1
+        IntegrationTests_2
+        IntegrationTests_3
+        IntegrationTests_tvOS
+        IntegrationTests_watchOS
+        WebDriverAgentLib
+        WebDriverAgentLib_tvOS
+        WebDriverAgentLib_watchOS
+        WebDriverAgentRunner
+        WebDriverAgentRunner_tvOS
+        WebDriverAgentRunner_watchOS
+        WebDriverAgentRunner-nodebug
+
