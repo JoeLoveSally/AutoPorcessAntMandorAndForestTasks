@@ -24,10 +24,14 @@ WebDriverAgent（WDA）的 REST 协议驱动 iPhone。本文档是**真机联调
   [facebook/WebDriverAgent](https://github.com/facebook/WebDriverAgent)（或
   appium 维护的 fork），改 bundle id 为自己的 Team 前缀，直接 Run 到手机上
   （手机开开发者模式），随后可取 ipa 归档。
-- **GitHub Actions 云构建**（macos runner 免费用）：workflow_dispatch 触发
+- **GitHub Actions 云构建**（macos runner 免费用）：`.github/workflows/wda.yml`
+  修改自身即自动触发，也可手动 workflow_dispatch（默认
+  `appium/WebDriverAgent@master`）。流程为
   `xcodebuild -project WebDriverAgent.xcodeproj -scheme WebDriverAgentRunner
-  -destination 'generic/platform=iOS' -archivePath wda.xcarchive archive`，
-  上传 archive/xcframework 产物；签名留给第 2 步。
+  -destination 'generic/platform=iOS' -archivePath wda.xcarchive archive`
+  → 打包 unsigned ipa 并挂到仓库 Releases（公开直接下载，job Artifacts 里
+  也有一份）；签名留给第 2 步。构建失败时各阶段日志会推到 `ci/wda/`
+  目录，可直接从 raw.githubusercontent 查看。
 
 ## 2. 签名并安装到 iPhone（Windows 可完成）
 

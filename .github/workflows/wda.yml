@@ -1,12 +1,14 @@
 # One-time WebDriverAgent build on a macOS runner: iOS has no public touch
 # injection API, and building WDA is the only step that needs macOS - the
 # daily run drives the phone from Windows/WSL2 over WDA's REST protocol.
-# The artifact is an UNSIGNED ipa published as a public release asset;
-# sign and install it from Windows with Sideloadly/AltStore
+# The result is an UNSIGNED ipa published as a public release asset; sign
+# and install it from Windows with Sideloadly/AltStore
 # (docs/ios_bringup.md §2). Free Apple ID signatures expire after 7 days -
 # re-sign, or rerun this workflow only when the WDA build itself needs
 # updating. Pushing a change to this file triggers a build automatically;
-# manual runs stay available via workflow_dispatch.
+# manual runs stay available via workflow_dispatch. On failure each stage's
+# captured log is pushed to ci/wda/ on the running branch so it can be read
+# without Actions log access.
 name: wda
 
 on:
@@ -44,26 +46,54 @@ jobs:
           # The newest installed Xcode; WDA follows the SDK it is built against.
           XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
           sudo xcode-select -s "$XCODE/Contents/Developer"
-          xcodebuild -version
+          xcodebuild -version 2>&1 | tee ci-xcode-log.txt
+
+      - name: List schemes and targets
+        # Wrong scheme names fail here with a tiny log instead of deep inside
+        # a multi-minute archive.
+        run: |
+          set -o pipefail
+          xcodebuild -list -project WebDriverAgent.xcodeproj 2>&1 | tee ci-project-log.txt
 
       - name: Archive unsigned WDA
         run: |
+          set -o pipefail
           xcodebuild \
             -project WebDriverAgent.xcodeproj \
             -scheme WebDriverAgentRunner \
             -destination 'generic/platform=iOS' \
-            -derivedDataPath build \
+            -derivedDataPath build/dd \
             -archivePath build/wda.xcarchive \
             archive \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee ci-archive-log.txt
 
       - name: Pack unsigned ipa
+        # No -maxdepth, no fixed product path: pick the shallowest .app in the
+        # archive whatever layout the current Xcode produces, and keep the
+        # whole tree listing for the failure path.
         run: |
-          mkdir build/Payload
-          APP=$(find build/wda.xcarchive/Products -maxdepth 2 -name "*.app" | head -1)
-          echo "Runner app: $APP"
+          set -uo pipefail
+          {
+            echo "== archive tree =="
+            find build/wda.xcarchive 2>&1 | sed -n '1,200p'
+          } | tee ci-pack-log.txt
+          APP=$(find build/wda.xcarchive 2>/dev/null \
+            | grep -E '\.app$' \
+            | awk -F/ '{print NF"\t"$0}' | sort -n | head -1 | cut -f2)
+          echo "Selected runner app: ${APP:-<none>}" | tee -a ci-pack-log.txt
+          if [ -z "$APP" ]; then
+            echo "no .app product found in the archive" | tee -a ci-pack-log.txt
+            exit 1
+          fi
+          mkdir -p build/Payload
           cp -R "$APP" build/Payload/
-          cd build && zip -qry wda-unsigned.ipa Payload
+          if [ ! -d "build/Payload/$(basename "$APP")" ]; then
+            echo "copying the runner app into Payload failed" | tee -a ci-pack-log.txt
+            exit 1
+          fi
+          (cd build && zip -qry wda-unsigned.ipa Payload)
+          ls -la build/wda-unsigned.ipa | tee -a ci-pack-log.txt
 
       - uses: actions/upload-artifact@v4
         with:
@@ -81,3 +111,24 @@ jobs:
             --notes "Unsigned WebDriverAgent ipa built from ${WDA_REPOSITORY}@${WDA_REF}. Sign and install from Windows with Sideloadly/AltStore (docs/ios_bringup.md §2); free Apple ID signatures last 7 days." \
             --prerelease \
             build/wda-unsigned.ipa
+
+      - name: Push stage logs to ci/wda/ on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Actions run logs need repo admin; pushing the captured stage logs
+          # keeps failures readable over raw.githubusercontent.com instead.
+          pushed=0
+          for f in ci-xcode-log.txt ci-project-log.txt ci-archive-log.txt ci-pack-log.txt; do
+            [ -f "$f" ] || continue
+            tail -c 300000 "$f" > ci-capped.txt
+            gh api -X PUT "repos/${{ github.repository }}/contents/ci/wda/$f" \
+              -f message="wda: $f from failed run ${{ github.run_number }}" \
+              -f content="$(base64 -i ci-capped.txt | tr -d '\n')" \
+              -f branch="${{ github.ref_name }}" >/dev/null \
+              && pushed=1 || echo "could not push $f"
+          done
+          if [ "$pushed" = "0" ]; then
+            echo "no stage logs captured before the failure"
+          fi
