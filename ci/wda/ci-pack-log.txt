@@ -1,0 +1,14 @@
+== archive tree ==
+build/wda.xcarchive
+build/wda.xcarchive/Products
+build/wda.xcarchive/dSYMs
+build/wda.xcarchive/dSYMs/WebDriverAgentLib.framework.dSYM
+build/wda.xcarchive/dSYMs/WebDriverAgentLib.framework.dSYM/Contents
+build/wda.xcarchive/dSYMs/WebDriverAgentLib.framework.dSYM/Contents/Resources
+build/wda.xcarchive/dSYMs/WebDriverAgentLib.framework.dSYM/Contents/Resources/Relocations
+build/wda.xcarchive/dSYMs/WebDriverAgentLib.framework.dSYM/Contents/Resources/Relocations/aarch64
+build/wda.xcarchive/dSYMs/WebDriverAgentLib.framework.dSYM/Contents/Resources/Relocations/aarch64/WebDriverAgentLib.yml
+build/wda.xcarchive/dSYMs/WebDriverAgentLib.framework.dSYM/Contents/Resources/DWARF
+build/wda.xcarchive/dSYMs/WebDriverAgentLib.framework.dSYM/Contents/Resources/DWARF/WebDriverAgentLib
+build/wda.xcarchive/dSYMs/WebDriverAgentLib.framework.dSYM/Contents/Info.plist
+build/wda.xcarchive/Info.plist
