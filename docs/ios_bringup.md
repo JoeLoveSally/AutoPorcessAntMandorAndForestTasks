@@ -37,6 +37,9 @@ WebDriverAgent（WDA）的 REST 协议驱动 iPhone。本文档是**真机联调
 
 - [Sideloadly](https://sideloadly.io/) 或 AltStore：载入预编译/云构建的
   WDA ipa + Apple ID 签名安装；或 3uTools/爱思助手的自签安装。
+  **Sideloadly 需关闭 "Automatic bundle id change"**：runner app 与内嵌
+  xctest 的 bundle id 是配对的（`com.facebook.WebDriverAgentRunner*`），
+  被改名后 xctest 注入会失败；免费通配签名无需改名即可签。
 - 手机：设置 → 隐私与安全 → 开发者模式 打开；首次启动 WDA 的
   `WebDriverAgentRunner-Runner` 后在 通用→VPN与设备管理 信任证书。
 - 验证安装：`pymobiledevice3 apps list | grep -i webdriveragent`（或
