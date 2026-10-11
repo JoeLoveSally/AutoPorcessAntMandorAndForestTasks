@@ -54,7 +54,7 @@ logger：记录各组件的动作、状态和诊断信息
 runtime/：由 runtime 组件管理的运行数据
 ```
 
-普通页面使用 ADB 截图、UI Tree 和 ADB 输入。能量雨使用 Android 原生 `screenrecord` H.264 连续帧与持久 ADB Shell 触控通道，避免逐帧启动 ADB 进程；scrcpy 保留为后续可替换的视频或控制实现。两种实时实现仍使用同一台 ADB 设备。
+普通页面按设备契约截图、合并 UI Tree（iOS 无 dump 时退化为纯 OCR 观测）和注入输入。能量雨使用连续帧与持久触控通道，经 Device 的 `screen_stream`/`touch_channel` 工厂方法访问；Android 首版使用原生 `screenrecord` H.264 连续帧与持久 ADB Shell 触控通道，避免逐帧启动 ADB 进程，scrcpy 保留为后续可替换的视频或控制实现。iOS 上实时通道显式声明不支持（能量雨步 fail-closed），方案留待真机联调阶段决定。
 
 UI Tree 在自绘页面可能不可用，此时通过截图识别。能量雨实现可参考 `real-device-regression` 分支，仍需在当前设备上验证延迟和效果。
 
@@ -64,11 +64,12 @@ UI Tree 在自绘页面可能不可用，此时通过截图识别。能量雨实
 
 隔离所有手机通信细节。
 
-- `common`：设备接口、坐标、边界、屏幕尺寸和方向换算。
-- `adb`：截图、UI dump、点击、滑动、返回、启动应用和前台页面查询。
+- `common`：设备契约 `DeviceLike`——前台应用 id、截图、UI dump、点击、滑动、返回、启动应用、实时通道和诊断的统一形状；上层组件只依赖这个契约，测试用 SimpleNamespace 桩即可满足。
+- `adb`：Android 实现——截图、UI dump、点击、滑动、返回键、启动应用和前台页面查询。
+- `ios`：iPhone 实现——通过 WebDriverAgent 的 REST 接口驱动（截图、点击、滑动、边缘右滑返回、前台 bundle id、启动应用）；无 UI dump 时观测退化为纯 OCR。
 - `realtime`：连续 H.264 视频帧、持久触控通道和延迟统计；首版使用 `screenrecord`，接口允许以后替换为 scrcpy。
 
-上层组件不能直接执行 ADB 或 scrcpy 命令。
+上层组件不能直接执行 ADB 或 scrcpy 命令。`platform = "android" | "ios"` 是装配层唯一的平台开关（`runtime.cli.build_device`），iOS 的部署与联调步骤见 `ios_bringup.md`。
 
 设备会话是 `device_bridge` 内部职责，不新增顶层组件：优先复用可用的 ADB server，必要时启动；校验目标设备序列号，读取屏幕尺寸、密度、旋转和系统 Insets，提供应用启动及前台查询能力。已有可用 server 属于正常情况，不应重启或关闭它。端口冲突或启动权限异常导致无法建立连接时，向 Runtime 返回明确失败原因并结束运行；开发工具沙箱导致的权限失败也应与真机连接故障区分。
 
