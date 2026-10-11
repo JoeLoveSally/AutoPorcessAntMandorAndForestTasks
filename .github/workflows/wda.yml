@@ -17,8 +17,8 @@ on:
         default: "appium/WebDriverAgent"
         required: true
       ref:
-        description: "branch / tag / commit of that repository"
-        default: "main"
+        description: "branch / tag / commit (appium/WebDriverAgent uses master)"
+        default: "master"
         required: true
   push:
     paths:
@@ -32,7 +32,7 @@ jobs:
     runs-on: macos-latest
     env:
       WDA_REPOSITORY: ${{ inputs.repository || 'appium/WebDriverAgent' }}
-      WDA_REF: ${{ inputs.ref || 'main' }}
+      WDA_REF: ${{ inputs.ref || 'master' }}
     steps:
       - uses: actions/checkout@v4
         with:
