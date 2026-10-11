@@ -71,23 +71,23 @@ jobs:
       - name: Pack unsigned ipa
         # The archive's install phase leaves Products/ empty (SKIP_INSTALL on
         # the runner), but the fully built app lands under the archive
-        # intermediates - take the shallowest .app under build/ whatever
-        # layout the current Xcode produces. The runner shell runs with
-        # bash -e, so every pipeline fully consumes its input (sed instead
-        # of head - no SIGPIPE) and failures are explicit, with the exit
-        # code appended to the log via trap.
+        # intermediates - take the shallowest REAL directory (the
+        # BuildProductsPath symlink to it is shallower and would otherwise
+        # win, and cp -R copies links as links, yielding a hollow ipa).
+        # zip follows links inside the app so nothing stays dangling, and
+        # the result is only accepted if the runner's Info.plist is inside.
         run: |
           set -o pipefail
           trap 'echo "pack exited rc=$?" | tee -a ci-pack-log.txt' EXIT
           {
-            echo "== .app candidates under build/ =="
-            find build -name '*.app' 2>/dev/null | sed -n '1,100p'
+            echo "== .app directories under build/ =="
+            find build -name '*.app' -type d 2>/dev/null | sed -n '1,100p'
           } | tee ci-pack-log.txt
-          APP=$(find build -name '*.app' 2>/dev/null \
+          APP=$(find build -name '*.app' -type d 2>/dev/null \
             | awk -F/ '{print NF"\t"$0}' | sort -n | sed -n '1p' | cut -f2) || APP=""
           echo "Selected runner app: ${APP:-<none>}" | tee -a ci-pack-log.txt
           if [ -z "$APP" ]; then
-            echo "no .app product found under build/" | tee -a ci-pack-log.txt
+            echo "no .app directory found under build/" | tee -a ci-pack-log.txt
             exit 1
           fi
           mkdir -p build/Payload
@@ -97,6 +97,11 @@ jobs:
           fi
           if ! (cd build && zip -qry wda-unsigned.ipa Payload); then
             echo "zipping Payload failed" | tee -a ci-pack-log.txt
+            exit 1
+          fi
+          if ! unzip -l build/wda-unsigned.ipa | grep -Eq 'Payload/[^/]+\.app/Info\.plist'; then
+            echo "acceptance failed: no Info.plist inside the packed runner app" \
+              | tee -a ci-pack-log.txt
             exit 1
           fi
           ls -la build/wda-unsigned.ipa | tee -a ci-pack-log.txt
@@ -111,6 +116,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Drop stale wda-run-* prereleases first: a hollow build must never
+          # be the release a human downloads (wda-run-5 shipped 465 bytes).
+          for tag in $(gh release list --repo "${{ github.repository }}" \
+              --json tagName --jq '.[].tagName'); do
+            case "$tag" in
+              wda-run-*) gh release delete "$tag" --repo "${{ github.repository }}" \
+                           -y --cleanup-tag || true ;;
+            esac
+          done
           gh release create "wda-run-${{ github.run_number }}" \
             --repo "${{ github.repository }}" \
             --title "WDA unsigned build: ${WDA_REPOSITORY}@${WDA_REF} (run ${{ github.run_number }})" \
