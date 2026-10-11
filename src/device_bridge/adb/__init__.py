@@ -112,3 +112,16 @@ class Device:
 
     def swipe(self, start, end, duration=350):
         self.shell("input", "swipe", *map(str, (*start, *end, duration)))
+
+    def screen_stream(self, device_size, ffmpeg="ffmpeg", decode_width=720, bitrate=8_000_000):
+        """Continuous decoded frames for the realtime flows (energy rain)."""
+        from device_bridge.realtime import AdbScreenrecordStream
+
+        return AdbScreenrecordStream(self.serial, device_size, self.adb, ffmpeg,
+                                     decode_width, bitrate)
+
+    def touch_channel(self):
+        """A persistent input channel so realtime taps skip shell startup."""
+        from device_bridge.realtime import PersistentAdbTouch
+
+        return PersistentAdbTouch(self.serial, self.adb)

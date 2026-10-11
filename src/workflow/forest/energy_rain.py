@@ -7,7 +7,6 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from device_bridge.realtime import AdbScreenrecordStream, PersistentAdbTouch
 from domain_data import AutomationError
 
 
@@ -64,15 +63,13 @@ def play(session, round_number):
 
     try:
         with (
-            AdbScreenrecordStream(
-                s.ex.device.serial,
+            s.ex.device.screen_stream(
                 (obs.width, obs.height),
-                s.ex.device.adb,
-                config.get("ffmpeg", "ffmpeg"),
-                config.get("realtime_width", 720),
-                config.get("realtime_bitrate", 8_000_000),
+                ffmpeg=config.get("ffmpeg", "ffmpeg"),
+                decode_width=config.get("realtime_width", 720),
+                bitrate=config.get("realtime_bitrate", 8_000_000),
             ) as stream,
-            PersistentAdbTouch(s.ex.device.serial, s.ex.device.adb) as touch,
+            s.ex.device.touch_channel() as touch,
         ):
             stream.read(timeout=config.get("realtime_start_timeout", 12))
             if s.ex.device.foreground() != s.ex.package:
